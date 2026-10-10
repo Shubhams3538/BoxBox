@@ -6,6 +6,7 @@ import {
 	login as apiLogin,
 	logout as apiLogout,
 	refresh as apiRefresh,
+	restoreSession,
 	isAuthenticated as hasAccessToken
 } from '$lib/api/auth';
 import { ApiRequestError, AuthSessionClosedError } from '$lib/api/client';
@@ -39,7 +40,7 @@ class AuthStore {
 
 			if (!isDevelopment && !isAuthenticated) {
 				try {
-					await apiRefresh();
+					await restoreSession();
 					isAuthenticated = true;
 					this.clearTransientAuthAlert();
 				} catch (error) {

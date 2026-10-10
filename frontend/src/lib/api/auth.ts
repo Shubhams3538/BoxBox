@@ -10,6 +10,7 @@ import {
 	isAuthenticated as checkAuth,
 	type AccessTokenResponse
 } from './client';
+import { earlyStart, type EarlyStartSource } from './earlyStart';
 
 /**
  * Login request
@@ -49,6 +50,19 @@ export async function login(username: string, password: string): Promise<LoginRe
  */
 export function refresh(): Promise<LoginResponse> {
 	return refreshSession();
+}
+
+/**
+ * Restore the session when the page loads. Uses the refresh the page shell already started, if it
+ * did, and asks the server otherwise. Never both: each refresh rotates the refresh token.
+ */
+export async function restoreSession(
+	source: EarlyStartSource = earlyStart
+): Promise<LoginResponse> {
+	const early = await source.takeSession();
+	if (!early) return refresh();
+	setAccessToken(early.accessToken);
+	return early;
 }
 
 /**
