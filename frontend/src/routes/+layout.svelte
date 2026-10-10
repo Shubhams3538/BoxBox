@@ -71,6 +71,7 @@
 
 	onMount(() => {
 		window.addEventListener(AuthRefreshEvent.eventName, handleAuthRefresh);
+		refreshFilesWhenJobsFinish(queryClient);
 		void authStore.initialize().finally(() => {
 			initialized = true;
 		});
@@ -113,8 +114,6 @@
 			jobsStore.reset();
 		}
 	});
-
-	$effect(() => refreshFilesWhenJobsFinish(queryClient));
 
 	$effect(() => {
 		if (!initialized || !authStore.isAuthenticated) return;
