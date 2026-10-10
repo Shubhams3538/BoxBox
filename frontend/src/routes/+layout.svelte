@@ -11,6 +11,7 @@
 	import { AlertTriangle, X } from 'lucide-svelte';
 	import { AuthRefreshEvent } from '$lib/api/client';
 	import { jobsStore } from '$lib/stores/jobs.svelte';
+	import { refreshFilesWhenJobsFinish } from '$lib/stores/refreshFilesOnJobs';
 	import { websocketStore } from '$lib/stores/websocket.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { shareWallpaperStore } from '$lib/stores/shareWallpaper.svelte';
@@ -112,6 +113,8 @@
 			jobsStore.reset();
 		}
 	});
+
+	$effect(() => refreshFilesWhenJobsFinish(queryClient));
 
 	$effect(() => {
 		if (!initialized || !authStore.isAuthenticated) return;
