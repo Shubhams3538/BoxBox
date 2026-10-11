@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { Buffer } from "node:buffer";
-import { randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { createServer as createNetServer, createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -25,7 +25,7 @@ const host = "127.0.0.1";
 const username = "auth-smoke-user";
 const mountName = "smoke";
 const refreshCookieName = "boxbox_refresh";
-const storeName = "auth-revocations.json";
+const storeName = "auth-sessions.json";
 const startupTimeoutMs = 20_000;
 const apiRoot = "/api/v1";
 const refreshPath = `${apiRoot}/auth/refresh`;
@@ -46,6 +46,8 @@ type StartupOutcome =
 type CredentialTransport = "header" | "query";
 
 const secrets = new Set<string>();
+
+let fixtureCredentials: { jwtSecret: string; passwordHash: string } | undefined;
 
 function parseArgs(args: string[]): CliOptions {
   if (args.length === 1 && args[0] === "--help") return { kind: "help" };
@@ -82,7 +84,7 @@ function parseArgs(args: string[]): CliOptions {
 
 function usage(): void {
   console.log(
-    "Usage: bun scripts/check-auth-revocations.ts [--binary /path/to/boxbox]\n" +
+    "Usage: bun scripts/check-auth-sessions.ts [--binary /path/to/boxbox]\n" +
       "Without --binary, builds backend/cmd/server into a private temporary directory.",
   );
 }
@@ -165,6 +167,89 @@ async function responseAccessToken(
   }
   return payload.accessToken;
 }
+function makeJwt(
+  jwtSecret: string,
+  tokenType: "access" | "refresh",
+  sessionId: string | undefined,
+): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(
+    JSON.stringify({ alg: "HS256", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      user_id: createHash("sha256").update(username).digest("hex").slice(0, 16),
+      username,
+      token_type: tokenType,
+      jti: randomUUID(),
+      iss: "boxbox",
+      sub: username,
+      iat: now,
+      nbf: now,
+      exp: now + 3600,
+      ...(sessionId === undefined ? {} : { sid: sessionId }),
+    }),
+  ).toString("base64url");
+  const input = `${header}.${payload}`;
+  const signature = createHmac("sha256", jwtSecret)
+    .update(input)
+    .digest("base64url");
+  const token = `${input}.${signature}`;
+  secrets.add(token);
+  return token;
+}
+
+async function expectFailedLogin(
+  baseUrl: string,
+  password: string,
+  existingRefreshToken: string,
+  label: string,
+): Promise<void> {
+  const response = await request(baseUrl, label, `${apiRoot}/auth/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `${refreshCookieName}=${existingRefreshToken}`,
+    },
+    body: JSON.stringify({ username, password }),
+  });
+  expectStatus(response, 500, label);
+  expectNoCookieChange(response, label);
+  await expectNoPairResponse(response, label);
+}
+
+async function expectNoPairResponse(
+  response: Response,
+  label: string,
+): Promise<void> {
+  const body = await response.text();
+  expect(
+    !body.includes('"accessToken"') && !body.includes('"refreshToken"'),
+    `${label}: failure returned a token pair`,
+  );
+}
+
+function expectNoCookieChange(response: Response, label: string): void {
+  expect(
+    response.headers.get("set-cookie") === null,
+    `${label}: retryable failure changed the refresh cookie`,
+  );
+}
+
+async function withENOTDIR<T>(
+  dataDir: string,
+  backupDir: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  renameSync(dataDir, backupDir);
+  try {
+    writeFileSync(dataDir, "not-a-directory", { mode: 0o600 });
+    return await action();
+  } finally {
+    rmSync(dataDir, { recursive: true, force: true });
+    renameSync(backupDir, dataDir);
+  }
+}
 
 function rememberPair(pair: TokenPair, issuedTokens: string[]): void {
   issuedTokens.push(pair.accessToken, pair.refreshToken);
@@ -246,14 +331,13 @@ async function expectRefreshRejected(
 
 async function logout(
   baseUrl: string,
-  pair: TokenPair,
+  refreshToken: string,
   label: string,
 ): Promise<Response> {
   return request(baseUrl, label, logoutPath, {
     method: "POST",
     headers: {
-      Cookie: `${refreshCookieName}=${pair.refreshToken}`,
-      Authorization: `Bearer ${pair.accessToken}`,
+      Cookie: `${refreshCookieName}=${refreshToken}`,
     },
   });
 }
@@ -441,10 +525,15 @@ function startProcess(
   backendDir: string,
   processes: Subprocess[],
 ): Subprocess {
+  const env = sanitizedEnvironment();
+  if (fixtureCredentials !== undefined) {
+    env.BOXBOX_JWT_SECRET = fixtureCredentials.jwtSecret;
+    env[`BOXBOX_USERS_${username}`] = fixtureCredentials.passwordHash;
+  }
   const proc = spawn({
     cmd: [binaryPath, "-config", configPath],
     cwd: backendDir,
-    env: sanitizedEnvironment(),
+    env,
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -498,7 +587,7 @@ async function expectStartupRefusal(
   }
   if (outcome.kind === "ready") {
     await killAndWait(proc);
-    throw new Error(`${label}: invalid revocation storage allowed startup`);
+    throw new Error(`${label}: invalid session registry allowed startup`);
   }
   await killAndWait(proc);
   throw new Error(
@@ -552,19 +641,14 @@ function writeConfig(
   port: number,
   dataDir: string,
   mountDir: string,
-  jwtSecret: string,
-  passwordHash: string,
 ): string {
   const configPath = join(root, `${label}.yaml`);
   const config = [
     `port: ${port}`,
     `host: ${yamlString(host)}`,
-    `jwt_secret: ${yamlString(jwtSecret)}`,
     "rate_limit_rps: 1000",
     `data_dir: ${yamlString(dataDir)}`,
     "allowed_origins: []",
-    "users:",
-    `  ${yamlString(username)}: ${yamlString(passwordHash)}`,
     "mount_points:",
     `  - name: ${yamlString(mountName)}`,
     `    path: ${yamlString(mountDir)}`,
@@ -574,6 +658,11 @@ function writeConfig(
   writeFileSync(configPath, config, { mode: 0o600 });
   chmodSync(configPath, 0o600);
   return configPath;
+}
+
+function writeStoreFixture(path: string, contents: string): void {
+  writeFileSync(path, contents, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 function expectMode(path: string, expected: number, label: string): void {
@@ -605,13 +694,22 @@ function verifyPermissionsAndNoRawTokens(
 ): void {
   const storePath = join(dataDir, storeName);
   const storeInfo = lstatSync(storePath);
-  expect(storeInfo.isFile(), "revocation snapshot is not a regular file");
+  expect(storeInfo.isFile(), "active-session registry is not a regular file");
   expectMode(root, 0o700, "temporary root");
   expectMode(dataDir, 0o700, "auth data directory");
   expectMode(mountDir, 0o700, "private mount directory");
   expectMode(configPath, 0o600, "generated config");
   expectMode(markerPath, 0o600, "private marker file");
-  expectMode(storePath, 0o600, "revocation snapshot");
+  expectMode(storePath, 0o600, "active-session registry");
+
+  const configContents = readFileSync(configPath, "utf8");
+  for (const credential of secrets) {
+    if (credential && configContents.includes(credential)) {
+      throw new Error(
+        "generated authentication credential persisted to config",
+      );
+    }
+  }
 
   for (const path of dataFiles(dataDir)) {
     const contents = readFileSync(path, "utf8");
@@ -659,7 +757,7 @@ async function runSmoke(): Promise<void> {
     process.on("SIGINT", onInterrupt);
     process.on("SIGTERM", onInterrupt);
 
-    tempRoot = mkdtempSync(join(tmpdir(), "boxbox-auth-revocations-"));
+    tempRoot = mkdtempSync(join(tmpdir(), "boxbox-auth-sessions-"));
     chmodSync(tempRoot, 0o700);
     const repoRoot = resolve(import.meta.dir, "..");
     const backendDir = join(repoRoot, "backend");
@@ -699,6 +797,7 @@ async function runSmoke(): Promise<void> {
     const jwtSecret = randomBytes(32).toString("hex");
     secrets.add(jwtSecret);
 
+    fixtureCredentials = { jwtSecret, passwordHash };
     const dataDir = join(tempRoot, "durable-data");
     const configPath = writeConfig(
       tempRoot,
@@ -706,8 +805,6 @@ async function runSmoke(): Promise<void> {
       port,
       dataDir,
       mountDir,
-      jwtSecret,
-      passwordHash,
     );
     let server = await startServer(
       binaryPath,
@@ -718,60 +815,136 @@ async function runSmoke(): Promise<void> {
       "initial server",
     );
 
-    const revoked = await login(
+    const logoutInitial = await login(
       baseUrl,
       password,
       issuedTokens,
-      "revocation login",
+      "session-wide logout login",
+    );
+    const logoutRotated = await refresh(
+      baseUrl,
+      logoutInitial.refreshToken,
+      issuedTokens,
+      "session-wide logout rotation",
+    );
+    const logoutRotatedAgain = await refresh(
+      baseUrl,
+      logoutRotated.refreshToken,
+      issuedTokens,
+      "second session-wide logout rotation",
+    );
+    const replayInitial = await login(
+      baseUrl,
+      password,
+      issuedTokens,
+      "concurrent refresh login",
     );
     const active = await login(baseUrl, password, issuedTokens, "active login");
-    const rotatedOriginal = await login(
+    const independent = await login(
       baseUrl,
       password,
       issuedTokens,
-      "rotation login",
+      "independent login",
     );
-    const replacement = await refresh(
+
+    const concurrentRefreshes = await Promise.all(
+      [1, 2].map(() =>
+        request(baseUrl, "concurrent refresh replay", refreshPath, {
+          method: "POST",
+          headers: {
+            Cookie: `${refreshCookieName}=${replayInitial.refreshToken}`,
+          },
+        }),
+      ),
+    );
+    const winners = concurrentRefreshes.filter(
+      (response) => response.status === 200,
+    );
+    const losers = concurrentRefreshes.filter(
+      (response) => response.status === 401,
+    );
+    expect(winners.length === 1, "concurrent refresh did not have one winner");
+    expect(losers.length === 1, "concurrent refresh did not reject one replay");
+    const winnerResponse = winners[0];
+    const loserResponse = losers[0];
+    expect(
+      winnerResponse !== undefined,
+      "concurrent refresh winner was missing",
+    );
+    expect(
+      loserResponse !== undefined,
+      "concurrent refresh replay was missing",
+    );
+    expectCookieCleared(loserResponse, "concurrent refresh replay");
+    await loserResponse.arrayBuffer();
+    const replayWinner = {
+      accessToken: await responseAccessToken(
+        winnerResponse,
+        "concurrent refresh winner",
+      ),
+      refreshToken: cookieValue(winnerResponse, "concurrent refresh winner"),
+    };
+    rememberPair(replayWinner, issuedTokens);
+    const replayWinnerStillUsable = await refresh(
       baseUrl,
-      rotatedOriginal.refreshToken,
+      replayWinner.refreshToken,
       issuedTokens,
-      "initial refresh rotation",
+      "refresh winner remains usable",
+    );
+    await protectedFiles(
+      baseUrl,
+      replayWinnerStillUsable.accessToken,
+      200,
+      "winner replacement access",
+    );
+    await expectRefreshRejected(
+      baseUrl,
+      replayInitial.refreshToken,
+      "losing concurrent refresh replay",
+    );
+    const replayWinnerAfterReplay = await refresh(
+      baseUrl,
+      replayWinnerStillUsable.refreshToken,
+      issuedTokens,
+      "winner refresh after replay",
+    );
+    await protectedFiles(
+      baseUrl,
+      replayWinnerAfterReplay.accessToken,
+      200,
+      "winner access after replay",
     );
 
-    await privateDownload(
+    await expectRefreshRejected(
       baseUrl,
-      active.accessToken,
-      "header",
-      200,
-      privateBytes,
-      "active stream header",
+      logoutInitial.refreshToken,
+      "first rotated refresh before logout",
     );
-    await privateDownload(
+    await expectRefreshRejected(
       baseUrl,
-      active.accessToken,
-      "query",
-      200,
-      privateBytes,
-      "active stream query",
+      logoutRotated.refreshToken,
+      "second rotated refresh before logout",
     );
-    await expectWebSocketStatus(
-      port,
-      active.accessToken,
-      "header",
-      101,
-      "active WebSocket header handshake",
+    const activeAccessTokens = [
+      logoutInitial.accessToken,
+      logoutRotated.accessToken,
+      logoutRotatedAgain.accessToken,
+    ];
+    for (const [index, accessToken] of activeAccessTokens.entries()) {
+      await protectedFiles(
+        baseUrl,
+        accessToken,
+        200,
+        `prior rotation access ${index + 1} before logout`,
+      );
+    }
+    const logoutResponse = await logout(
+      baseUrl,
+      logoutRotatedAgain.refreshToken,
+      "session-wide logout",
     );
-    await expectWebSocketStatus(
-      port,
-      active.accessToken,
-      "query",
-      101,
-      "active WebSocket query handshake",
-    );
-
-    const logoutResponse = await logout(baseUrl, revoked, "initial logout");
-    expectStatus(logoutResponse, 200, "initial logout");
-    expectCookieCleared(logoutResponse, "initial logout");
+    expectStatus(logoutResponse, 200, "session-wide logout");
+    expectCookieCleared(logoutResponse, "session-wide logout");
     await logoutResponse.arrayBuffer();
 
     await killAndWait(server);
@@ -781,162 +954,223 @@ async function runSmoke(): Promise<void> {
       backendDir,
       port,
       processes,
-      "durable restart",
+      "durable session restart",
     );
 
-    await protectedFiles(
-      baseUrl,
-      revoked.accessToken,
-      401,
-      "revoked access after restart",
-    );
+    for (const [index, accessToken] of activeAccessTokens.entries()) {
+      await protectedFiles(
+        baseUrl,
+        accessToken,
+        401,
+        `session-wide logged-out access ${index + 1} after restart`,
+      );
+    }
     await expectRefreshRejected(
       baseUrl,
-      revoked.refreshToken,
-      "revoked refresh after restart",
+      logoutRotatedAgain.refreshToken,
+      "logged-out refresh after restart",
     );
-    await privateDownload(
-      baseUrl,
-      revoked.accessToken,
-      "header",
-      401,
-      privateBytes,
-      "revoked stream header after restart",
-    );
-    await privateDownload(
-      baseUrl,
-      revoked.accessToken,
-      "query",
-      401,
-      privateBytes,
-      "revoked stream query after restart",
-    );
-    await expectWebSocketStatus(
-      port,
-      revoked.accessToken,
-      "header",
-      401,
-      "revoked WebSocket header handshake",
-    );
-    await expectWebSocketStatus(
-      port,
-      revoked.accessToken,
-      "query",
-      401,
-      "revoked WebSocket query handshake",
-    );
+    for (const [index, accessToken] of activeAccessTokens.entries()) {
+      await privateDownload(
+        baseUrl,
+        accessToken,
+        index === 0 ? "header" : "query",
+        401,
+        privateBytes,
+        `logged-out private stream ${index + 1} after restart`,
+      );
+      await expectWebSocketStatus(
+        port,
+        accessToken,
+        index === 0 ? "header" : "query",
+        401,
+        `logged-out WebSocket ${index === 0 ? "header" : "query"} after restart`,
+      );
+    }
 
-    await protectedFiles(
-      baseUrl,
-      active.accessToken,
-      200,
-      "unaffected active access after restart",
-    );
-    await protectedFiles(
-      baseUrl,
-      replacement.accessToken,
-      200,
-      "replacement access after restart",
-    );
+    for (const { label, pair } of [
+      { label: "active", pair: active },
+      { label: "independent", pair: independent },
+      { label: "concurrent-refresh winner", pair: replayWinnerAfterReplay },
+    ]) {
+      await protectedFiles(
+        baseUrl,
+        pair.accessToken,
+        200,
+        `${label} access after restart`,
+      );
+    }
     await expectRefreshRejected(
       baseUrl,
-      rotatedOriginal.refreshToken,
-      "rotated refresh replay after restart",
+      replayInitial.refreshToken,
+      "old concurrent refresh after restart",
     );
-    await protectedFiles(
-      baseUrl,
-      active.accessToken,
-      200,
-      "active access after old replay",
-    );
-    const activeAfterReplay = await refresh(
+    const activeAfterRestart = await refresh(
       baseUrl,
       active.refreshToken,
       issuedTokens,
-      "active refresh after old replay",
+      "active refresh after restart",
     );
-    await protectedFiles(
+    const independentAfterRestart = await refresh(
       baseUrl,
-      activeAfterReplay.accessToken,
-      200,
-      "active replacement after old replay",
-    );
-    await protectedFiles(
-      baseUrl,
-      replacement.accessToken,
-      200,
-      "replacement access after old replay",
-    );
-    const replacementAfterReplay = await refresh(
-      baseUrl,
-      replacement.refreshToken,
+      independent.refreshToken,
       issuedTokens,
-      "replacement refresh after old replay",
+      "independent refresh after restart",
+    );
+    const replayWinnerAfterRestart = await refresh(
+      baseUrl,
+      replayWinnerAfterReplay.refreshToken,
+      issuedTokens,
+      "winner refresh after restart replay",
+    );
+    await protectedFiles(
+      baseUrl,
+      activeAfterRestart.accessToken,
+      200,
+      "active replacement after restart",
+    );
+    await protectedFiles(
+      baseUrl,
+      independentAfterRestart.accessToken,
+      200,
+      "independent replacement after restart",
+    );
+    await protectedFiles(
+      baseUrl,
+      replayWinnerAfterRestart.accessToken,
+      200,
+      "replay winner replacement after restart",
+    );
+    await privateDownload(
+      baseUrl,
+      activeAfterRestart.accessToken,
+      "header",
+      200,
+      privateBytes,
+      "active stream bearer header after restart",
+    );
+    await privateDownload(
+      baseUrl,
+      independentAfterRestart.accessToken,
+      "query",
+      200,
+      privateBytes,
+      "independent stream token query after restart",
+    );
+    await expectWebSocketStatus(
+      port,
+      activeAfterRestart.accessToken,
+      "header",
+      101,
+      "active WebSocket bearer header after restart",
+    );
+    await expectWebSocketStatus(
+      port,
+      independentAfterRestart.accessToken,
+      "query",
+      101,
+      "independent WebSocket token query after restart",
+    );
+
+    const legacyAccess = makeJwt(jwtSecret, "access", undefined);
+    const legacyRefresh = makeJwt(jwtSecret, "refresh", undefined);
+    const unknownSessionId = randomUUID();
+    const unknownSessionAccess = makeJwt(jwtSecret, "access", unknownSessionId);
+    const unknownSessionRefresh = makeJwt(
+      jwtSecret,
+      "refresh",
+      unknownSessionId,
+    );
+    await protectedFiles(
+      baseUrl,
+      legacyAccess,
+      401,
+      "legacy access without sid",
     );
     await expectRefreshRejected(
       baseUrl,
-      rotatedOriginal.refreshToken,
-      "repeated old refresh replay",
+      legacyRefresh,
+      "legacy refresh without sid",
     );
     await protectedFiles(
       baseUrl,
-      replacementAfterReplay.accessToken,
-      200,
-      "new replacement access after old replay",
+      unknownSessionAccess,
+      401,
+      "unknown session access",
     );
-    await privateDownload(
+    await expectRefreshRejected(
       baseUrl,
-      active.accessToken,
-      "header",
-      200,
-      privateBytes,
-      "active stream header after restart",
+      unknownSessionRefresh,
+      "unknown session refresh",
     );
-    await privateDownload(
-      baseUrl,
-      replacementAfterReplay.accessToken,
-      "query",
-      200,
-      privateBytes,
-      "replacement stream query after restart",
+    issuedTokens.push(
+      legacyAccess,
+      legacyRefresh,
+      unknownSessionAccess,
+      unknownSessionRefresh,
     );
-    await expectWebSocketStatus(
-      port,
-      active.accessToken,
-      "header",
-      101,
-      "active WebSocket header after restart",
-    );
-    await expectWebSocketStatus(
-      port,
-      replacementAfterReplay.accessToken,
-      "query",
-      101,
-      "replacement WebSocket query after restart",
-    );
+
     results.push({
-      scenario: "Restart, rotation, and old-token replay",
+      scenario: "Legacy and unknown-session credentials",
       outcome: "PASS",
       evidence:
-        "Logout-revoked access/refresh and rotated refresh stayed rejected after SIGKILL/restart; active and replacement sessions continued refreshing after old-token replay.",
+        "In-memory test-secret-signed legacy access/refresh JWTs without sid and access/refresh JWTs with an unregistered sid each returned HTTP 401 at the real API.",
     });
+
     results.push({
-      scenario: "Protected stream and WebSocket transports",
+      scenario: "Session-wide logout, restart, and independent sessions",
       outcome: "PASS",
       evidence:
-        "Private stream bytes matched exactly for bearer-header and token-query requests; fresh WebSocket header/query handshakes accepted active tokens and rejected revoked access.",
+        "After SIGKILL/restart, all three access tokens from two prior rotations and the current refresh token from the logged-out sid returned 401; two separate logins and their refreshes remained HTTP 200.",
     });
+    results.push({
+      scenario: "Refresh replay and private transports",
+      outcome: "PASS",
+      evidence:
+        "Two concurrent uses of one refresh token produced one HTTP 200 winner and one HTTP 401 replay; the winning session refreshed before and after restart. Active stream header/query returned exact marker bytes, active WebSocket header/query returned 101, and removed-session stream/WebSocket header/query returned 401.",
+    });
+
+    const obstructedDataDir = join(tempRoot, "durable-data-backup");
+    await withENOTDIR(dataDir, obstructedDataDir, async () => {
+      await expectFailedLogin(
+        baseUrl,
+        password,
+        activeAfterRestart.refreshToken,
+        "ENOTDIR login",
+      );
+    });
+    const loginRetry = await login(
+      baseUrl,
+      password,
+      issuedTokens,
+      "login retry after storage restore",
+    );
+    await protectedFiles(
+      baseUrl,
+      loginRetry.accessToken,
+      200,
+      "retried login access",
+    );
+    const preservedCookieRetry = await refresh(
+      baseUrl,
+      activeAfterRestart.refreshToken,
+      issuedTokens,
+      "preexisting cookie retry after failed login",
+    );
+    await protectedFiles(
+      baseUrl,
+      preservedCookieRetry.accessToken,
+      200,
+      "preexisting cookie after failed login",
+    );
 
     const retryable = await login(
       baseUrl,
       password,
       issuedTokens,
-      "storage retry login",
+      "refresh storage retry login",
     );
-    const obstructedDataDir = join(tempRoot, "durable-data-backup");
-    renameSync(dataDir, obstructedDataDir);
-    try {
-      writeFileSync(dataDir, "not-a-directory", { mode: 0o600 });
+    await withENOTDIR(dataDir, obstructedDataDir, async () => {
       const failedRefresh = await request(
         baseUrl,
         "ENOTDIR refresh",
@@ -947,15 +1181,15 @@ async function runSmoke(): Promise<void> {
         },
       );
       expectStatus(failedRefresh, 500, "ENOTDIR refresh");
-      expect(
-        failedRefresh.headers.get("set-cookie") === null,
-        "ENOTDIR refresh: retryable failure changed the refresh cookie",
+      expectNoCookieChange(failedRefresh, "ENOTDIR refresh");
+      await expectNoPairResponse(failedRefresh, "ENOTDIR refresh");
+      await protectedFiles(
+        baseUrl,
+        retryable.accessToken,
+        200,
+        "refresh failure preserved prior access",
       );
-      await failedRefresh.arrayBuffer();
-    } finally {
-      rmSync(dataDir, { force: true });
-      renameSync(obstructedDataDir, dataDir);
-    }
+    });
     const retried = await refresh(
       baseUrl,
       retryable.refreshToken,
@@ -969,87 +1203,118 @@ async function runSmoke(): Promise<void> {
       "retried replacement access",
     );
     results.push({
-      scenario: "Pre-publication ENOTDIR failure and retry",
+      scenario: "ENOTDIR login and refresh retry",
       outcome: "PASS",
       evidence:
-        "A regular-file obstruction forced ENOTDIR; refresh returned 500 without Set-Cookie, and the identical cookie rotated successfully after the directory was restored.",
+        "With durable-data replaced by a regular file, login and refresh each returned HTTP 500 without Set-Cookie; failed login returned no access pair, the sent auth cookie was not overwritten, the preexisting access remained HTTP 200, and login plus the identical refresh cookie succeeded after repair.",
     });
 
     const prior = await login(
       baseUrl,
       password,
       issuedTokens,
-      "prior-revocation login",
+      "prior-session removal login",
     );
     const pending = await login(
       baseUrl,
       password,
       issuedTokens,
-      "mixed-session login",
+      "second-session logout retry login",
     );
-    const priorLogout = await logout(baseUrl, prior, "prior-revocation logout");
-    expectStatus(priorLogout, 200, "prior-revocation logout");
-    expectCookieCleared(priorLogout, "prior-revocation logout");
+    const priorLogout = await logout(
+      baseUrl,
+      prior.refreshToken,
+      "prior-session logout",
+    );
+    expectStatus(priorLogout, 200, "prior-session logout");
+    expectCookieCleared(priorLogout, "prior-session logout");
     await priorLogout.arrayBuffer();
     await protectedFiles(
       baseUrl,
       prior.accessToken,
       401,
-      "prior access before mixed logout",
+      "prior access before failed second logout",
     );
     await expectRefreshRejected(
       baseUrl,
       prior.refreshToken,
-      "prior refresh before mixed logout",
+      "prior refresh before failed second logout",
     );
 
-    renameSync(dataDir, obstructedDataDir);
-    try {
-      writeFileSync(dataDir, "not-a-directory", { mode: 0o600 });
-      const failedLogout = await request(
+    await withENOTDIR(dataDir, obstructedDataDir, async () => {
+      const failedLogout = await logout(
         baseUrl,
-        "mixed-session ENOTDIR logout",
-        logoutPath,
-        {
-          method: "POST",
-          headers: {
-            Cookie: `${refreshCookieName}=${pending.refreshToken}`,
-            Authorization: `Bearer ${prior.accessToken}`,
-          },
-        },
+        pending.refreshToken,
+        "ENOTDIR logout",
       );
-      expectStatus(failedLogout, 500, "mixed-session ENOTDIR logout");
-      expect(
-        failedLogout.headers.get("set-cookie") === null,
-        "mixed-session logout: retryable failure changed the refresh cookie",
-      );
-      await failedLogout.arrayBuffer();
-    } finally {
-      rmSync(dataDir, { force: true });
-      renameSync(obstructedDataDir, dataDir);
-    }
+      expectStatus(failedLogout, 500, "ENOTDIR logout");
+      expectNoCookieChange(failedLogout, "ENOTDIR logout");
+      await expectNoPairResponse(failedLogout, "ENOTDIR logout");
+    });
     await protectedFiles(
       baseUrl,
       prior.accessToken,
       401,
-      "prior access revocation after failed mixed logout",
+      "prior access after failed second logout",
     );
     await expectRefreshRejected(
       baseUrl,
       prior.refreshToken,
-      "prior refresh revocation after failed mixed logout",
-    );
-    const pendingRetry = await refresh(
-      baseUrl,
-      pending.refreshToken,
-      issuedTokens,
-      "new session retry after mixed logout failure",
+      "prior refresh after failed second logout",
     );
     await protectedFiles(
       baseUrl,
-      pendingRetry.accessToken,
+      pending.accessToken,
       200,
-      "new session access after mixed logout failure",
+      "second-session access after failed logout",
+    );
+    const pendingLogoutRetry = await logout(
+      baseUrl,
+      pending.refreshToken,
+      "second-session logout retry",
+    );
+    expectStatus(pendingLogoutRetry, 200, "second-session logout retry");
+    expectCookieCleared(pendingLogoutRetry, "second-session logout retry");
+    await pendingLogoutRetry.arrayBuffer();
+    await protectedFiles(
+      baseUrl,
+      pending.accessToken,
+      401,
+      "second-session access after logout retry",
+    );
+    await expectRefreshRejected(
+      baseUrl,
+      pending.refreshToken,
+      "second-session refresh after logout retry",
+    );
+    const laterWriteSession = await login(
+      baseUrl,
+      password,
+      issuedTokens,
+      "later session write after logout retry",
+    );
+    const laterWriteReplacement = await refresh(
+      baseUrl,
+      laterWriteSession.refreshToken,
+      issuedTokens,
+      "later session refresh write",
+    );
+    await protectedFiles(
+      baseUrl,
+      laterWriteReplacement.accessToken,
+      200,
+      "later session access after write",
+    );
+    await protectedFiles(
+      baseUrl,
+      prior.accessToken,
+      401,
+      "prior access after later session write",
+    );
+    await expectRefreshRejected(
+      baseUrl,
+      prior.refreshToken,
+      "prior refresh after later session write",
     );
 
     await killAndWait(server);
@@ -1059,26 +1324,47 @@ async function runSmoke(): Promise<void> {
       backendDir,
       port,
       processes,
-      "mixed-session rollback restart",
+      "failure-retry restart",
     );
     await protectedFiles(
       baseUrl,
       prior.accessToken,
       401,
-      "prior access after mixed-session restart",
+      "prior access after failure-retry restart",
+    );
+    await expectRefreshRejected(
+      baseUrl,
+      prior.refreshToken,
+      "prior refresh after failure-retry restart",
     );
     await protectedFiles(
       baseUrl,
-      pendingRetry.accessToken,
-      200,
-      "replacement access after mixed-session restart",
+      pending.accessToken,
+      401,
+      "second-session access after logout restart",
     );
-
+    await expectRefreshRejected(
+      baseUrl,
+      pending.refreshToken,
+      "second-session refresh after logout restart",
+    );
+    await protectedFiles(
+      baseUrl,
+      laterWriteReplacement.accessToken,
+      200,
+      "later session access after failure-retry restart",
+    );
+    await protectedFiles(
+      baseUrl,
+      activeAfterRestart.accessToken,
+      200,
+      "unrelated session after failure-retry restart",
+    );
     results.push({
-      scenario: "Mixed-session pre-publication rollback",
+      scenario: "ENOTDIR logout retry and prior removal preservation",
       outcome: "PASS",
       evidence:
-        "Failed logout of a second session preserved the first session's already-persisted access/refresh revocation and left the second refresh usable after restart.",
+        "ENOTDIR logout returned HTTP 500 without Set-Cookie or a token pair; retrying logout with the unchanged refresh cookie returned HTTP 200. The first session's removed access/refresh stayed HTTP 401 after the failed logout, a later login/refresh write, and SIGKILL/restart.",
     });
 
     verifyPermissionsAndNoRawTokens(
@@ -1097,50 +1383,53 @@ async function runSmoke(): Promise<void> {
     });
 
     await killAndWait(server);
-    server = await startServer(
-      binaryPath,
-      configPath,
-      backendDir,
-      port,
-      processes,
-      "corrupt-store setup restart",
-    );
-    await killAndWait(server);
 
     const storePath = join(dataDir, storeName);
-    writeFileSync(storePath, "{malformed", { mode: 0o600 });
-    chmodSync(storePath, 0o600);
+    writeStoreFixture(storePath, "{malformed");
     await expectStartupRefusal(
       binaryPath,
       configPath,
       backendDir,
       port,
       processes,
-      "malformed revocation snapshot",
+      "malformed session store",
     );
-
-    writeFileSync(
+    writeStoreFixture(storePath, JSON.stringify({ version: 2, sessions: {} }));
+    await expectStartupRefusal(
+      binaryPath,
+      configPath,
+      backendDir,
+      port,
+      processes,
+      "future-version session store",
+    );
+    writeStoreFixture(storePath, JSON.stringify({ version: 1 }));
+    await expectStartupRefusal(
+      binaryPath,
+      configPath,
+      backendDir,
+      port,
+      processes,
+      "missing sessions map",
+    );
+    writeStoreFixture(
       storePath,
-      JSON.stringify({ version: 999, revokedRefresh: {}, revokedAccess: {} }),
-      { mode: 0o600 },
+      JSON.stringify({ version: 1, sessions: {}, unexpected: true }),
     );
-    chmodSync(storePath, 0o600);
     await expectStartupRefusal(
       binaryPath,
       configPath,
       backendDir,
       port,
       processes,
-      "future-version revocation snapshot",
+      "unknown session store field",
     );
 
     const symlinkTarget = join(tempRoot, "symlink-target.json");
-    writeFileSync(
+    writeStoreFixture(
       symlinkTarget,
-      JSON.stringify({ version: 1, revokedRefresh: {}, revokedAccess: {} }),
-      { mode: 0o600 },
+      JSON.stringify({ version: 1, sessions: {} }),
     );
-    chmodSync(symlinkTarget, 0o600);
     rmSync(storePath, { force: true });
     symlinkSync(symlinkTarget, storePath);
     await expectStartupRefusal(
@@ -1149,13 +1438,13 @@ async function runSmoke(): Promise<void> {
       backendDir,
       port,
       processes,
-      "symlink revocation snapshot",
+      "symlink session store",
     );
     results.push({
-      scenario: "Strict startup validation",
+      scenario: "Strict session-store startup validation",
       outcome: "PASS",
       evidence:
-        "Malformed JSON, an unsupported future version, and a symlink snapshot each terminated startup before the health endpoint became ready.",
+        "Malformed JSON, future version 2, missing required sessions map, unknown top-level field, and a symlink at auth-sessions.json each exited before /health became ready.",
     });
 
     const oldDataDir = join(tempRoot, "old-snapshot-data");
@@ -1165,8 +1454,6 @@ async function runSmoke(): Promise<void> {
       port,
       oldDataDir,
       mountDir,
-      jwtSecret,
-      passwordHash,
     );
     server = await startServer(
       binaryPath,
@@ -1176,31 +1463,38 @@ async function runSmoke(): Promise<void> {
       processes,
       "old-snapshot limitation setup",
     );
-    const oldSnapshot = join(tempRoot, "valid-old-snapshot.json");
-    copyFileSync(join(oldDataDir, storeName), oldSnapshot);
-    chmodSync(oldSnapshot, 0o600);
     const oldSnapshotSession = await login(
       baseUrl,
       password,
       issuedTokens,
       "old-snapshot limitation login",
     );
+    const oldSnapshot = join(tempRoot, "valid-old-snapshot.json");
+    copyFileSync(join(oldDataDir, storeName), oldSnapshot);
+    chmodSync(oldSnapshot, 0o600);
     const oldSnapshotLogout = await logout(
       baseUrl,
-      oldSnapshotSession,
+      oldSnapshotSession.refreshToken,
       "old-snapshot limitation logout",
     );
     expectStatus(oldSnapshotLogout, 200, "old-snapshot limitation logout");
+    expectCookieCleared(oldSnapshotLogout, "old-snapshot limitation logout");
     await oldSnapshotLogout.arrayBuffer();
     await protectedFiles(
       baseUrl,
       oldSnapshotSession.accessToken,
       401,
-      "revocation before old-snapshot restore",
+      "session removed before old-snapshot restore",
+    );
+    await expectRefreshRejected(
+      baseUrl,
+      oldSnapshotSession.refreshToken,
+      "refresh removed before old-snapshot restore",
     );
     await killAndWait(server);
-    copyFileSync(oldSnapshot, join(oldDataDir, storeName));
-    chmodSync(join(oldDataDir, storeName), 0o600);
+    const oldSnapshotPath = join(oldDataDir, storeName);
+    copyFileSync(oldSnapshot, oldSnapshotPath);
+    chmodSync(oldSnapshotPath, 0o600);
     server = await startServer(
       binaryPath,
       oldConfigPath,
@@ -1213,31 +1507,35 @@ async function runSmoke(): Promise<void> {
       baseUrl,
       oldSnapshotSession.accessToken,
       200,
-      "credential revived by valid old snapshot",
+      "access revived by valid prior session registry",
     );
-    await refresh(
+    const revivedRefresh = await refresh(
       baseUrl,
       oldSnapshotSession.refreshToken,
       issuedTokens,
-      "refresh revived by valid old snapshot",
+      "refresh revived by valid prior session registry",
+    );
+    await protectedFiles(
+      baseUrl,
+      revivedRefresh.accessToken,
+      200,
+      "replacement access after snapshot restore",
     );
     results.push({
-      scenario: "Known limitation: restoring an older valid snapshot",
+      scenario: "LIMITATION: restoring an older valid session registry",
       outcome: "LIMITATION (expected risk)",
       evidence:
-        "Restoring a valid prior snapshot revived a credential revoked in the newer snapshot; backup rollback requires JWT signing-secret rotation.",
+        "A backup captured while the sid was active restored both access validation (HTTP 200) and its current refresh (HTTP 200) after logout had removed it; rotate the JWT signing secret after restoring stale state to reject revived credentials.",
     });
 
     await killAndWait(server);
-    const missingDataDir = join(tempRoot, "missing-snapshot-data");
+    const missingDataDir = join(tempRoot, "missing-session-store-data");
     const missingConfigPath = writeConfig(
       tempRoot,
-      "missing-snapshot",
+      "missing-session-store",
       port,
       missingDataDir,
       mountDir,
-      jwtSecret,
-      passwordHash,
     );
     server = await startServer(
       binaryPath,
@@ -1245,54 +1543,115 @@ async function runSmoke(): Promise<void> {
       backendDir,
       port,
       processes,
-      "missing-snapshot limitation setup",
+      "missing session store setup",
     );
-    const missingSession = await login(
+    const missingStoreSession = await login(
       baseUrl,
       password,
       issuedTokens,
-      "missing-snapshot limitation login",
+      "missing-store session login",
     );
-    const missingLogout = await logout(
-      baseUrl,
-      missingSession,
-      "missing-snapshot limitation logout",
-    );
-    expectStatus(missingLogout, 200, "missing-snapshot limitation logout");
-    await missingLogout.arrayBuffer();
+    const missingStorePath = join(missingDataDir, storeName);
+    rmSync(missingStorePath, { force: true });
     await protectedFiles(
       baseUrl,
-      missingSession.accessToken,
-      401,
-      "revocation before snapshot deletion",
+      missingStoreSession.accessToken,
+      200,
+      "loaded session remains active after store deletion",
     );
+    results.push({
+      scenario:
+        "LIMITATION: runtime file deletion does not clear loaded sessions",
+      outcome: "LIMITATION (expected risk)",
+      evidence:
+        "Deleting auth-sessions.json while the server was running left its already-loaded access token accepted with HTTP 200. File deletion is not immediate revocation; restart to discard loaded state.",
+    });
     await killAndWait(server);
-    rmSync(join(missingDataDir, storeName), { force: true });
     server = await startServer(
       binaryPath,
       missingConfigPath,
       backendDir,
       port,
       processes,
-      "missing-snapshot restart",
+      "missing session store restart",
     );
     await protectedFiles(
       baseUrl,
-      missingSession.accessToken,
-      200,
-      "credential revived by missing snapshot",
+      missingStoreSession.accessToken,
+      401,
+      "old access after missing-store restart",
     );
-    await refresh(
+    await expectRefreshRejected(
       baseUrl,
-      missingSession.refreshToken,
+      missingStoreSession.refreshToken,
+      "old refresh after missing-store restart",
+    );
+    const afterMissingStoreLogin = await login(
+      baseUrl,
+      password,
       issuedTokens,
-      "refresh revived by missing snapshot",
+      "fresh login after missing-store restart",
+    );
+    await protectedFiles(
+      baseUrl,
+      afterMissingStoreLogin.accessToken,
+      200,
+      "fresh access after missing-store restart",
+    );
+
+    await killAndWait(server);
+    writeStoreFixture(
+      missingStorePath,
+      JSON.stringify({ version: 1, sessions: {} }),
+    );
+    server = await startServer(
+      binaryPath,
+      missingConfigPath,
+      backendDir,
+      port,
+      processes,
+      "empty session store restart",
+    );
+    await protectedFiles(
+      baseUrl,
+      missingStoreSession.accessToken,
+      401,
+      "old access after empty-store restart",
+    );
+    await expectRefreshRejected(
+      baseUrl,
+      missingStoreSession.refreshToken,
+      "old refresh after empty-store restart",
+    );
+    await protectedFiles(
+      baseUrl,
+      afterMissingStoreLogin.accessToken,
+      401,
+      "previous fresh access after empty-store restart",
+    );
+    await expectRefreshRejected(
+      baseUrl,
+      afterMissingStoreLogin.refreshToken,
+      "previous fresh refresh after empty-store restart",
+    );
+    const afterEmptyStoreLogin = await login(
+      baseUrl,
+      password,
+      issuedTokens,
+      "fresh login after empty-store restart",
+    );
+    await protectedFiles(
+      baseUrl,
+      afterEmptyStoreLogin.accessToken,
+      200,
+      "fresh access after empty-store restart",
     );
     results.push({
-      scenario: "Known limitation: deleted/missing snapshot",
-      outcome: "LIMITATION (expected risk)",
+      scenario:
+        "Missing file and valid empty registry fail closed after restart",
+      outcome: "PASS",
       evidence:
-        "Deleting the snapshot caused first-run initialization and revived previously revoked credentials; snapshot loss requires JWT signing-secret rotation.",
+        "After SIGKILL, a missing registry file denied old access and refresh with HTTP 401 while fresh login returned HTTP 200. Restarting with a valid empty v1 sessions map also denied both prior access/refresh pairs (HTTP 401) and allowed a fresh login (HTTP 200).",
     });
   } catch (error) {
     failure = redactedMessage(error);
@@ -1317,6 +1676,9 @@ async function runSmoke(): Promise<void> {
       }
     }
     process.removeListener("SIGINT", onInterrupt);
+    fixtureCredentials = undefined;
+    secrets.clear();
+    issuedTokens.length = 0;
     process.removeListener("SIGTERM", onInterrupt);
   }
   if (interrupted && !failure) failure = "Interrupted before completion";
@@ -1326,7 +1688,7 @@ async function runSmoke(): Promise<void> {
   }
   printResults(results);
   if (failure) {
-    console.error(`Auth revocation smoke check failed: ${failure}`);
+    console.error(`Auth session smoke check failed: ${failure}`);
     process.exitCode = 1;
   }
 }

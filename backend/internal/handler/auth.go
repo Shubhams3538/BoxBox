@@ -126,8 +126,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if err := h.authService.Logout(r.Context(), refreshToken, accessToken); err != nil {
+	if err := h.authService.Logout(r.Context(), refreshToken); err != nil {
 		if isTerminalAuthError(err) {
 			h.clearRefreshCookie(w, r)
 		}

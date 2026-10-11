@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jR4dh3y/BoxBox/backend/internal/config"
+	"github.com/jR4dh3y/BoxBox/backend/internal/middleware"
 	"github.com/jR4dh3y/BoxBox/backend/internal/model"
 	"github.com/jR4dh3y/BoxBox/backend/internal/pkg/filesystem"
 	"github.com/jR4dh3y/BoxBox/backend/internal/service"
@@ -89,7 +91,6 @@ func TestAuthRefreshTokenUsesHttpOnlyCookie(t *testing.T) {
 		nil,
 	).WithContext(context.Background())
 	logoutRequest.AddCookie(rotatedCookie)
-	logoutRequest.Header.Set("Authorization", "Bearer "+accessToken)
 	logoutResponse := httptest.NewRecorder()
 	handler.Logout(logoutResponse, logoutRequest)
 	if logoutResponse.Code != http.StatusOK {
@@ -98,6 +99,68 @@ func TestAuthRefreshTokenUsesHttpOnlyCookie(t *testing.T) {
 	clearedCookie := onlyCookie(t, logoutResponse)
 	if clearedCookie.Value != "" || clearedCookie.MaxAge >= 0 {
 		t.Fatalf("successful logout cookie = %#v, want deletion", clearedCookie)
+	}
+}
+func TestAuthLogoutRevokesEveryAccessTokenForOnlyThatSession(t *testing.T) {
+	dataDir := t.TempDir()
+	auth, handler := newAuthHandler(t, filesystem.NewOsFS(), dataDir)
+	login := func() (LoginResponse, *http.Cookie) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "http://boxbox.example/api/v1/auth/login",
+			bytes.NewBufferString(`{"username":"admin","password":"correct-password"}`))
+		response := httptest.NewRecorder()
+		handler.Login(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("login status = %d; body=%s", response.Code, response.Body.String())
+		}
+		var pair LoginResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &pair); err != nil {
+			t.Fatal(err)
+		}
+		return pair, onlyCookie(t, response)
+	}
+
+	firstPair, firstCookie := login()
+	independentPair, _ := login()
+	rotated := refreshRequest(handler, firstCookie)
+	if rotated.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d; body=%s", rotated.Code, rotated.Body.String())
+	}
+	var rotatedPair LoginResponse
+	if err := json.Unmarshal(rotated.Body.Bytes(), &rotatedPair); err != nil {
+		t.Fatal(err)
+	}
+	rotatedCookie := onlyCookie(t, rotated)
+
+	logoutRequest := httptest.NewRequest(http.MethodPost, "http://boxbox.example/api/v1/auth/logout", nil)
+	logoutRequest.AddCookie(rotatedCookie)
+	logoutResponse := httptest.NewRecorder()
+	handler.Logout(logoutResponse, logoutRequest)
+	if logoutResponse.Code != http.StatusOK {
+		t.Fatalf("logout status = %d; body=%s", logoutResponse.Code, logoutResponse.Body.String())
+	}
+
+	protected := middleware.JWTAuth(auth)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for _, token := range []struct {
+		name       string
+		access     string
+		wantStatus int
+	}{
+		{name: "access issued before rotation", access: firstPair.AccessToken, wantStatus: http.StatusUnauthorized},
+		{name: "access issued by rotation", access: rotatedPair.AccessToken, wantStatus: http.StatusUnauthorized},
+		{name: "independent login", access: independentPair.AccessToken, wantStatus: http.StatusOK},
+	} {
+		t.Run(token.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/files", nil)
+			request.Header.Set("Authorization", "Bearer "+token.access)
+			response := httptest.NewRecorder()
+			protected.ServeHTTP(response, request)
+			if response.Code != token.wantStatus {
+				t.Fatalf("protected request status = %d, want %d", response.Code, token.wantStatus)
+			}
+		})
 	}
 }
 
@@ -111,19 +174,91 @@ func TestAuthRejectsCrossOriginCookieRequests(t *testing.T) {
 		t.Fatalf("status = %d, want forbidden", response.Code)
 	}
 }
+
+func TestAuthLoginPersistenceFailuresDoNotIssueCredentials(t *testing.T) {
+	loginRequest := func(cookie *http.Cookie) *http.Request {
+		request := httptest.NewRequest(http.MethodPost, "http://boxbox.example/api/v1/auth/login",
+			bytes.NewBufferString(`{"username":"admin","password":"correct-password"}`))
+		if cookie != nil {
+			request.AddCookie(cookie)
+		}
+		return request
+	}
+
+	t.Run("pre-publication failure preserves unrelated cookie and retry works", func(t *testing.T) {
+		dataDir := t.TempDir()
+		fsys := &publicationFailFS{FS: filesystem.NewOsFS(), dataDir: dataDir}
+		_, handler := newAuthHandler(t, fsys, dataDir)
+		existingCookie := loginCookie(t, handler)
+		fsys.failure = failBeforePublish
+
+		failed := httptest.NewRecorder()
+		handler.Login(failed, loginRequest(existingCookie))
+		if failed.Code != http.StatusInternalServerError {
+			t.Fatalf("login status = %d, want 500; body=%s", failed.Code, failed.Body.String())
+		}
+		if cookies := failed.Result().Cookies(); len(cookies) != 0 {
+			t.Fatalf("failed login Set-Cookie = %#v, want none", cookies)
+		}
+		if strings.Contains(failed.Body.String(), "accessToken") ||
+			strings.Contains(failed.Body.String(), "refreshToken") {
+			t.Fatal("failed login exposed credentials")
+		}
+
+		fsys.failure = failNever
+		retried := httptest.NewRecorder()
+		handler.Login(retried, loginRequest(existingCookie))
+		if retried.Code != http.StatusOK {
+			t.Fatalf("login retry status = %d; body=%s", retried.Code, retried.Body.String())
+		}
+		onlyCookie(t, retried)
+		fsys.failure = failNever
+		existingSession := refreshRequest(handler, existingCookie)
+		if existingSession.Code != http.StatusOK {
+			t.Fatalf("existing session refresh status = %d; body=%s", existingSession.Code, existingSession.Body.String())
+		}
+	})
+
+	t.Run("post-publication failure requires recovery without a cookie", func(t *testing.T) {
+		dataDir := t.TempDir()
+		fsys := &publicationFailFS{FS: filesystem.NewOsFS(), dataDir: dataDir}
+		_, handler := newAuthHandler(t, fsys, dataDir)
+		existingCookie := loginCookie(t, handler)
+		fsys.failure = failAfterPublish
+
+		failed := httptest.NewRecorder()
+		handler.Login(failed, loginRequest(existingCookie))
+		if failed.Code != http.StatusUnauthorized {
+			t.Fatalf("login status = %d, want 401; body=%s", failed.Code, failed.Body.String())
+		}
+		var body model.ErrorResponse
+		if err := json.Unmarshal(failed.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Code != model.ErrCodeSessionRecoveryRequired {
+			t.Fatalf("login recovery error = %#v", body)
+		}
+		if cookies := failed.Result().Cookies(); len(cookies) != 0 {
+			t.Fatalf("recovery login Set-Cookie = %#v, want none", cookies)
+		}
+		if strings.Contains(failed.Body.String(), "accessToken") ||
+			strings.Contains(failed.Body.String(), "refreshToken") {
+			t.Fatal("recovery login exposed credentials")
+		}
+		fsys.failure = failNever
+		existingSession := refreshRequest(handler, existingCookie)
+		if existingSession.Code != http.StatusOK {
+			t.Fatalf("existing session refresh status = %d; body=%s", existingSession.Code, existingSession.Body.String())
+		}
+	})
+}
+
 func TestAuthPersistenceFailuresPreserveOrClearCookieByOutcome(t *testing.T) {
-	t.Run("pre-publication failure preserves cookie for retry and prior revocations", func(t *testing.T) {
+	t.Run("pre-publication refresh failure preserves cookie for retry", func(t *testing.T) {
 		dataDir := t.TempDir()
 		fsys := &publicationFailFS{FS: filesystem.NewOsFS(), dataDir: dataDir}
 		auth, handler := newAuthHandler(t, fsys, dataDir)
 
-		previous, err := auth.Login(context.Background(), "admin", "correct-password")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := auth.Logout(context.Background(), previous.RefreshToken, previous.AccessToken); err != nil {
-			t.Fatal(err)
-		}
 		cookie := loginCookie(t, handler)
 
 		fsys.failure = failBeforePublish
@@ -147,12 +282,9 @@ func TestAuthPersistenceFailuresPreserveOrClearCookieByOutcome(t *testing.T) {
 		if _, err := auth.ValidateRefreshToken(cookie.Value); !errors.Is(err, service.ErrTokenRevoked) {
 			t.Fatalf("previous refresh token after retry = %v, want revoked", err)
 		}
-		if _, err := auth.ValidateRefreshToken(previous.RefreshToken); !errors.Is(err, service.ErrTokenRevoked) {
-			t.Fatalf("earlier revocation after retry = %v, want revoked", err)
-		}
 	})
 
-	t.Run("post-publication failure is terminal and retains durable revocation", func(t *testing.T) {
+	t.Run("post-publication failure is terminal and keeps the published rotation", func(t *testing.T) {
 		dataDir := t.TempDir()
 		fsys := &publicationFailFS{FS: filesystem.NewOsFS(), dataDir: dataDir}
 		_, handler := newAuthHandler(t, fsys, dataDir)
@@ -185,7 +317,7 @@ func TestAuthPersistenceFailuresPreserveOrClearCookieByOutcome(t *testing.T) {
 			t.Fatalf("restart auth service: %v", err)
 		}
 		if _, err := restarted.ValidateRefreshToken(cookie.Value); !errors.Is(err, service.ErrTokenRevoked) {
-			t.Fatalf("published refresh revocation after restart = %v, want revoked", err)
+			t.Fatalf("published refresh rotation after restart = %v, want revoked", err)
 		}
 	})
 
@@ -327,7 +459,7 @@ type publicationFailFS struct {
 }
 
 func (f *publicationFailFS) Rename(oldPath, newPath string) error {
-	if filepath.Base(newPath) != "auth-revocations.json" {
+	if filepath.Base(newPath) != config.AuthSessionsFileName {
 		return f.FS.Rename(oldPath, newPath)
 	}
 	if f.failure == failBeforePublish {

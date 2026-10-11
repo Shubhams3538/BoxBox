@@ -16,13 +16,19 @@ HOST_PORT=8081
 docker compose up -d
 ```
 
-## Logout or Refresh Fails
+## Login, Logout, or Refresh Fails
 
-For refresh or logout, a storage `500` before publication leaves the refresh cookie unchanged. Do not clear it. Check that the configured `data_dir` is writable and backed by persistent storage, then retry the action.
+If login, refresh, or logout returns `500` before rename, the server did not publish the session update. It sends no new token pair or `Set-Cookie` header. Refresh and logout leave the existing cookie unchanged so you can retry. Login does not clear an unrelated existing cookie. Check that `data_dir` is writable and on persistent storage, then retry.
 
-`401 SESSION_RECOVERY_REQUIRED` means the server installed the new snapshot but a later durability check failed. It clears the refresh cookie because it cannot confirm the snapshot will survive a crash. Sign in again. A logout that returns this code did not report success.
+`401 SESSION_RECOVERY_REQUIRED` means rename published the update, but a later durability step failed. The server keeps its in-memory state and returns no token pair. Refresh and logout clear the cookie; login does not clear an unrelated cookie. Sign in again. Logout did not report success.
 
-If the server stops at startup with a revocation-store error, do not delete `auth-revocations.json` or let the application create a new store. Check the server logs and the `data_dir` mount, permissions, and backup state. Restore a known-current copy of the store if available. A missing, deleted, or older store can make revoked tokens valid again. If the store was lost or rolled back, rotate `BOXBOX_JWT_SECRET` before exposing the server.
+If startup reports an `auth-sessions.json` error, check the logs, `data_dir` mount, file type, permissions, and backup state. Corrupt, unreadable, non-regular, unsupported, and future-version registries stop startup. Do not replace the file with an empty file to bypass the error. Restore a valid registry backup if available.
+
+If the registry file was missing, or a valid version 1 snapshot had an empty `sessions` map, when the server restarted, its active session list is empty. Previously issued access and refresh tokens are rejected, and users can sign in again. A zero-byte or malformed file is not an empty registry and causes startup to fail. A secret rotation is not required solely because the registry was lost. `auth-revocations.json` is ignored and is not deleted; the old denylist cannot reconstruct active sessions.
+
+Deleting `auth-sessions.json` while the server is running does not clear the in-memory sessions. A later successful write can save them again. Do not use runtime file deletion as immediate revocation.
+
+An older valid registry backup can revive its sessions, access tokens, and current refresh tokens. Rotate `BOXBOX_JWT_SECRET` after restoring one. If you downgrade to an older validator that ignores session IDs and the registry, rotate the secret because that validator may accept those tokens. Tokens without a session ID are rejected by the current server and are never enrolled automatically.
 
 ## Unreachable After Upgrading to v0.3.0
 
