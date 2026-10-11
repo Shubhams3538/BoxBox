@@ -20,10 +20,11 @@ import (
 
 // Auth-related errors
 var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrInvalidToken       = errors.New("invalid token")
-	ErrTokenExpired       = errors.New("token expired")
-	ErrTokenRevoked       = errors.New("token revoked")
+	ErrInvalidCredentials      = errors.New("invalid credentials")
+	ErrInvalidToken            = errors.New("invalid token")
+	ErrTokenExpired            = errors.New("token expired")
+	ErrTokenRevoked            = errors.New("token revoked")
+	ErrSessionRecoveryRequired = errors.New("session recovery required")
 )
 
 type TokenType string
@@ -199,10 +200,16 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 		return nil, err
 	}
 	s.revokedRefresh[tokenHash] = claims.ExpiresAt.Time
-	err = s.persistRevocationsLocked()
+	result, persistErr := s.persistRevocationsLocked()
+	if persistErr != nil && !result.published {
+		delete(s.revokedRefresh, tokenHash)
+		s.mu.Unlock()
+		return nil, persistErr
+	}
 	s.mu.Unlock()
-	if err != nil {
-		return nil, err
+	if persistErr != nil {
+		log.Error().Err(persistErr).Msg("Could not durably persist auth refresh revocation")
+		return nil, errors.Join(ErrSessionRecoveryRequired, persistErr)
 	}
 	return pair, nil
 }
@@ -283,12 +290,31 @@ func (s *authService) Logout(ctx context.Context, refreshToken, accessToken stri
 		return ErrTokenRevoked
 	}
 	s.revokedRefresh[refreshHash] = refreshClaims.ExpiresAt.Time
+	var previousAccessExpiration time.Time
+	var accessWasRevoked bool
 	if accessClaims != nil {
+		previousAccessExpiration, accessWasRevoked = s.revokedAccess[accessClaims.ID]
 		s.revokedAccess[accessClaims.ID] = accessClaims.ExpiresAt.Time
 	}
-	err = s.persistRevocationsLocked()
+	result, persistErr := s.persistRevocationsLocked()
+	if persistErr != nil && !result.published {
+		delete(s.revokedRefresh, refreshHash)
+		if accessClaims != nil {
+			if accessWasRevoked {
+				s.revokedAccess[accessClaims.ID] = previousAccessExpiration
+			} else {
+				delete(s.revokedAccess, accessClaims.ID)
+			}
+		}
+		s.mu.Unlock()
+		return persistErr
+	}
 	s.mu.Unlock()
-	return err
+	if persistErr != nil {
+		log.Error().Err(persistErr).Msg("Could not durably persist auth logout revocation")
+		return errors.Join(ErrSessionRecoveryRequired, persistErr)
+	}
+	return nil
 }
 
 // generateTokenPair creates a new access and refresh token pair
@@ -377,7 +403,12 @@ func (s *authService) CleanupExpiredTokens() error {
 		return failure.count == 0 || now.Sub(failure.lockedUntil) > config.LoginLockoutMaxDelay
 	})
 	if refreshCount != len(s.revokedRefresh) || accessCount != len(s.revokedAccess) {
-		return s.persistRevocationsLocked()
+		result, err := s.persistRevocationsLocked()
+		if err != nil && result.published {
+			log.Error().Err(err).Msg("Could not durably persist auth token cleanup")
+			return errors.Join(ErrSessionRecoveryRequired, err)
+		}
+		return err
 	}
 	return nil
 }

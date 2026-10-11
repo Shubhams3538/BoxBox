@@ -40,7 +40,7 @@ func (s *authService) loadRevocations() error {
 	}
 	if !exists {
 		s.mu.Lock()
-		err := s.persistRevocationsLocked()
+		_, err := s.persistRevocationsLocked()
 		s.mu.Unlock()
 		return err
 	}
@@ -162,26 +162,30 @@ func (s *authService) prepareRevocationDirectory() (err error) {
 	}
 }
 
+type authRevocationWriteResult struct {
+	published bool
+}
+
 // persistRevocationsLocked writes a snapshot while the service mutex is held.
-func (s *authService) persistRevocationsLocked() error {
+func (s *authService) persistRevocationsLocked() (authRevocationWriteResult, error) {
+	var result authRevocationWriteResult
 	temporary := s.revocationsPath + ".tmp." + uuid.New().String()
 	file, err := s.fs.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("create temporary auth revocation store: %w", err)
+		return result, fmt.Errorf("create temporary auth revocation store: %w", err)
 	}
 	closed := false
-	renamed := false
 	defer func() {
 		if !closed {
 			_ = file.Close()
 		}
-		if !renamed {
+		if !result.published {
 			_ = s.fs.Remove(temporary)
 		}
 	}()
 
 	if err := s.fs.Chmod(temporary, 0o600); err != nil {
-		return fmt.Errorf("secure temporary auth revocation store: %w", err)
+		return result, fmt.Errorf("secure temporary auth revocation store: %w", err)
 	}
 	snapshot := authRevocationsSnapshot{
 		Version:        authRevocationsVersion,
@@ -189,24 +193,24 @@ func (s *authService) persistRevocationsLocked() error {
 		RevokedAccess:  s.revokedAccess,
 	}
 	if err := json.NewEncoder(file).Encode(snapshot); err != nil {
-		return fmt.Errorf("encode auth revocation store: %w", err)
+		return result, fmt.Errorf("encode auth revocation store: %w", err)
 	}
 	if err := file.Sync(); err != nil {
-		return fmt.Errorf("sync auth revocation store: %w", err)
+		return result, fmt.Errorf("sync auth revocation store: %w", err)
 	}
 	if err := file.Close(); err != nil {
 		closed = true
-		return fmt.Errorf("close auth revocation store: %w", err)
+		return result, fmt.Errorf("close auth revocation store: %w", err)
 	}
 	closed = true
 	if err := s.fs.Rename(temporary, s.revocationsPath); err != nil {
-		return fmt.Errorf("publish auth revocation store: %w", err)
+		return result, fmt.Errorf("publish auth revocation store: %w", err)
 	}
-	renamed = true
+	result.published = true
 	if err := syncDirectory(s.fs, filepath.Dir(s.revocationsPath)); err != nil {
-		return fmt.Errorf("sync auth revocation directory: %w", err)
+		return result, fmt.Errorf("sync auth revocation directory: %w", err)
 	}
-	return nil
+	return result, nil
 }
 
 func syncDirectory(fsys filesystem.FS, path string) error {

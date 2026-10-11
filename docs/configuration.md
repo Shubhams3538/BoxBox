@@ -74,6 +74,10 @@ mount_points:
 | `max_upload_mb` | `10240` | Maximum upload size in MiB. |
 | `chunk_size_mb` | `10` | Chunk size in MiB that the browser uses for uploads. Lower it when a reverse proxy limits request body size. |
 
+The Linux auth service creates or validates `auth-revocations.json` under `data_dir` at startup. Startup stops if the store is corrupt, unreadable, or unsupported. Development mode also needs a writable `data_dir` because `--dev` does not bypass store initialization.
+
+Missing or deleted stores and older restored copies can make revoked tokens valid again. Restore only a current backup to preserve revocations. If you delete or lose the store, restore an older copy, or downgrade to a version that does not preserve revocations, rotate `BOXBOX_JWT_SECRET` before relying on those revocations. Revocations from before this feature cannot be recovered. Rotate the secret once after upgrading if you need to invalidate those sessions.
+
 ## Users
 
 Users are configured as a map of username to bcrypt hash:

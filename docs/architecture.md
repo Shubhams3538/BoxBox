@@ -104,14 +104,18 @@ The frontend uses a same-origin API base of `/api/v1`. In production the browser
 
 Most server state is intentionally lightweight:
 
-- Auth refresh-token and access-token revocations are persisted under `/data/auth-revocations.json`.
-- The versioned JSON snapshot stores SHA-256 refresh-token hashes and access-token IDs with their expiry times, never raw JWTs.
+- Auth refresh-token and access-token revocations are persisted in `auth-revocations.json` under `data_dir`.
+- The versioned JSON snapshot stores SHA-256 refresh-token hashes and access-token IDs with expiry times, never raw JWTs.
 - Jobs are in memory and cleaned after a retention period.
 - Upload sessions are in memory with temporary chunks on disk.
 - Custom drive names are persisted under `/data/drive-names.json`.
 - Files themselves remain on mounted host paths.
 
-The revocation snapshot serializes writes within the server process. Only one server process can use a data directory; the file store does not coordinate separate processes.
+The revocation store writes a synced temporary file, renames it over the snapshot, then syncs the parent directory. The rename is the publication point. If writing fails before publication, refresh and logout restore only the entries they changed before releasing the auth mutex. They do not copy or roll back the whole in-memory store.
+
+If a later durability check fails after publication, the service keeps the in-memory changes and returns `ErrSessionRecoveryRequired`. The HTTP API reports `401 SESSION_RECOVERY_REQUIRED` and requires a new sign-in because the server cannot confirm that the installed snapshot will survive a crash. A write failure before publication returns an ordinary `500` and leaves the refresh cookie unchanged so the request can be retried.
+
+The file store relies on Linux filesystem rename and sync behavior and supports one server process per `data_dir`. It does not coordinate multiple processes. Missing, deleted, or older restored stores can revive revoked tokens. Revocations made before persistent storage was introduced cannot be recovered.
 
 ## Security Boundaries
 

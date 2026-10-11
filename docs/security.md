@@ -21,12 +21,11 @@ BoxBox uses JWT access and refresh tokens:
 
 - Access tokens expire after 15 minutes.
 - Refresh tokens expire after 7 days and are rotated in an HttpOnly, SameSite=Strict cookie.
-- Access tokens stay in browser memory and logout revokes both current tokens.
-- Logout and refresh rotation persist revocations in `auth-revocations.json` under `data_dir`. The store contains refresh-token SHA-256 hashes and access-token IDs, never raw JWTs.
-- The service restricts the store directory to `0700` and the file to `0600`.
-- A missing store is created at startup. A corrupt or unreadable store stops startup, and storage errors prevent logout or refresh from reporting success.
-- Keep `data_dir` on persistent storage. Deleting the revocation store or restoring an older copy can make revoked tokens usable again; rotate `BOXBOX_JWT_SECRET` when resetting this state.
-- Only one server process can use a `data_dir`; the file store does not coordinate separate processes.
+- Access tokens stay in browser memory. Logout revokes the refresh token and, when supplied and valid for the same user, the access token.
+- Refresh rotation and logout save revocations to `auth-revocations.json` under `data_dir`. The store holds refresh-token SHA-256 hashes and access-token IDs with expiry times, never raw JWTs.
+- On Linux, the service restricts the store directory to `0700` and the file to `0600`. It creates a missing store at startup, but it does not reset a corrupt, unreadable, or unsupported store.
+- A write failure before snapshot publication returns `500`; the server restores only entries changed by that request and keeps the refresh cookie for retry. If a later durability check fails after publication, the server returns `401 SESSION_RECOVERY_REQUIRED` and clears the cookie because it cannot confirm the installed snapshot will survive a crash. Sign in again.
+- Keep `data_dir` on persistent storage and run one server process per directory. Deleting the store, restoring an older backup, or downgrading to a version that does not preserve revocations can make revoked tokens valid again. Rotate `BOXBOX_JWT_SECRET` if the store is lost or rolled back. Revocations from before this feature cannot be recovered; rotate the secret after upgrading if those sessions must be invalidated.
 - Auth endpoints are rate-limited per client IP.
 - Repeated failures trigger exponential per-account lockouts.
 

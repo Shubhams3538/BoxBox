@@ -139,50 +139,236 @@ func TestAuthServiceRejectsUnreadableRevocationStore(t *testing.T) {
 	}
 }
 
-func TestAuthPersistenceFailureDoesNotReportLogoutOrRefreshSuccess(t *testing.T) {
-	t.Run("refresh", func(t *testing.T) {
-		dataDir := filepath.Join(t.TempDir(), "data")
-		fsys := &failingAuthStoreWriteFS{FS: filesystem.NewOsFS()}
-		service, err := NewAuthService(fsys, testAuthConfig(t, dataDir))
-		if err != nil {
-			t.Fatalf("create auth service: %v", err)
-		}
-		pair, err := service.Login(context.Background(), "admin", "correct-password")
-		if err != nil {
-			t.Fatalf("login: %v", err)
-		}
-		fsys.fail = true
-		replacement, err := service.Refresh(context.Background(), pair.RefreshToken)
-		if err == nil || replacement != nil {
-			t.Fatalf("refresh returned credentials=%t and error=%v", replacement != nil, err)
-		}
-		if _, err := service.ValidateRefreshToken(pair.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
-			t.Fatalf("refresh token after failed persistence = %v, want in-memory revocation", err)
-		}
-	})
+func TestAuthPrepublicationPersistenceFailuresAreRetryable(t *testing.T) {
+	stages := []authPersistenceFailureStage{
+		authPersistenceFailCreate,
+		authPersistenceFailChmod,
+		authPersistenceFailWrite,
+		authPersistenceFailFileSync,
+		authPersistenceFailFileClose,
+		authPersistenceFailRename,
+	}
+	for _, stage := range stages {
+		for _, operation := range []string{"refresh", "logout"} {
+			t.Run(string(stage)+"/"+operation, func(t *testing.T) {
+				dataDir := filepath.Join(t.TempDir(), "data")
+				service, faultFS := newFaultInjectedAuthService(t, dataDir)
+				pair, err := service.Login(context.Background(), "admin", "correct-password")
+				if err != nil {
+					t.Fatalf("login: %v", err)
+				}
 
-	t.Run("logout", func(t *testing.T) {
-		dataDir := filepath.Join(t.TempDir(), "data")
-		fsys := &failingAuthStoreWriteFS{FS: filesystem.NewOsFS()}
-		service, err := NewAuthService(fsys, testAuthConfig(t, dataDir))
-		if err != nil {
-			t.Fatalf("create auth service: %v", err)
+				faultFS.stage = stage
+				var persistErr error
+				if operation == "refresh" {
+					replacement, err := service.Refresh(context.Background(), pair.RefreshToken)
+					persistErr = err
+					if replacement != nil {
+						t.Fatal("failed refresh returned credentials")
+					}
+				} else {
+					persistErr = service.Logout(context.Background(), pair.RefreshToken, pair.AccessToken)
+				}
+				if !errors.Is(persistErr, errInjectedAuthPersistenceFailure) {
+					t.Fatalf("persistence error = %v, want injected failure", persistErr)
+				}
+				if errors.Is(persistErr, ErrSessionRecoveryRequired) {
+					t.Fatalf("pre-publication error marked terminal: %v", persistErr)
+				}
+
+				faultFS.stage = authPersistenceNoFailure
+				restarted := newTestAuthServiceAt(t, dataDir)
+				for _, current := range []*authService{service, restarted} {
+					if _, err := current.ValidateRefreshToken(pair.RefreshToken); err != nil {
+						t.Fatalf("refresh token after failed %s in process/restart: %v", operation, err)
+					}
+					if operation == "logout" {
+						if _, err := current.ValidateAccessToken(pair.AccessToken); err != nil {
+							t.Fatalf("access token after failed logout in process/restart: %v", err)
+						}
+					}
+				}
+
+				if operation == "refresh" {
+					replacement, err := service.Refresh(context.Background(), pair.RefreshToken)
+					if err != nil || replacement == nil {
+						t.Fatalf("retry refresh returned credentials=%t, error=%v", replacement != nil, err)
+					}
+				} else if err := service.Logout(context.Background(), pair.RefreshToken, pair.AccessToken); err != nil {
+					t.Fatalf("retry logout: %v", err)
+				}
+				if _, err := service.ValidateRefreshToken(pair.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
+					t.Fatalf("refresh token after retry = %v, want revoked", err)
+				}
+				if operation == "logout" {
+					if _, err := service.ValidateAccessToken(pair.AccessToken); !errors.Is(err, ErrTokenRevoked) {
+						t.Fatalf("access token after retry = %v, want revoked", err)
+					}
+				}
+			})
 		}
-		pair, err := service.Login(context.Background(), "admin", "correct-password")
-		if err != nil {
-			t.Fatalf("login: %v", err)
+	}
+}
+
+func TestAuthPostpublicationPersistenceFailuresRequireRecovery(t *testing.T) {
+	stages := []authPersistenceFailureStage{
+		authPersistenceFailDirectoryOpen,
+		authPersistenceFailDirectorySync,
+		authPersistenceFailDirectoryClose,
+	}
+	for _, stage := range stages {
+		for _, operation := range []string{"refresh", "logout"} {
+			t.Run(string(stage)+"/"+operation, func(t *testing.T) {
+				dataDir := filepath.Join(t.TempDir(), "data")
+				service, faultFS := newFaultInjectedAuthService(t, dataDir)
+				pair, err := service.Login(context.Background(), "admin", "correct-password")
+				if err != nil {
+					t.Fatalf("login: %v", err)
+				}
+				active, err := service.Login(context.Background(), "admin", "correct-password")
+				if err != nil {
+					t.Fatalf("login for active tokens: %v", err)
+				}
+
+				faultFS.stage = stage
+				var persistErr error
+				if operation == "refresh" {
+					replacement, err := service.Refresh(context.Background(), pair.RefreshToken)
+					persistErr = err
+					if replacement != nil {
+						t.Fatal("failed refresh returned credentials")
+					}
+				} else {
+					persistErr = service.Logout(context.Background(), pair.RefreshToken, pair.AccessToken)
+				}
+				if !errors.Is(persistErr, ErrSessionRecoveryRequired) {
+					t.Fatalf("post-publication error = %v, want session recovery required", persistErr)
+				}
+				if !errors.Is(persistErr, errInjectedAuthPersistenceFailure) {
+					t.Fatalf("post-publication error lost persistence cause: %v", persistErr)
+				}
+
+				faultFS.stage = authPersistenceNoFailure
+				restarted := newTestAuthServiceAt(t, dataDir)
+				for _, current := range []*authService{service, restarted} {
+					if _, err := current.ValidateRefreshToken(pair.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
+						t.Fatalf("old refresh token after failed %s in process/restart = %v, want revoked", operation, err)
+					}
+					if operation == "logout" {
+						if _, err := current.ValidateAccessToken(pair.AccessToken); !errors.Is(err, ErrTokenRevoked) {
+							t.Fatalf("access token after failed logout in process/restart = %v, want revoked", err)
+						}
+					}
+					if _, err := current.ValidateRefreshToken(active.RefreshToken); err != nil {
+						t.Fatalf("unaffected refresh token in process/restart: %v", err)
+					}
+				}
+			})
 		}
-		fsys.fail = true
-		if err := service.Logout(context.Background(), pair.RefreshToken, pair.AccessToken); err == nil {
-			t.Fatal("logout succeeded without committing revocations")
+	}
+}
+
+func TestFailedMixedLogoutPreservesPreviouslyCommittedAccessRevocation(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	service, faultFS := newFaultInjectedAuthService(t, dataDir)
+	revokedAccessPair, err := service.Login(context.Background(), "admin", "correct-password")
+	if err != nil {
+		t.Fatalf("login for access token: %v", err)
+	}
+	firstRefresh, err := service.Login(context.Background(), "admin", "correct-password")
+	if err != nil {
+		t.Fatalf("login for initial logout: %v", err)
+	}
+	retryRefresh, err := service.Login(context.Background(), "admin", "correct-password")
+	if err != nil {
+		t.Fatalf("login for retryable logout: %v", err)
+	}
+	if err := service.Logout(context.Background(), firstRefresh.RefreshToken, revokedAccessPair.AccessToken); err != nil {
+		t.Fatalf("commit initial mixed logout: %v", err)
+	}
+	if _, err := service.ValidateAccessToken(revokedAccessPair.AccessToken); !errors.Is(err, ErrTokenRevoked) {
+		t.Fatalf("access token after initial logout = %v, want revoked", err)
+	}
+
+	faultFS.stage = authPersistenceFailWrite
+	err = service.Logout(context.Background(), retryRefresh.RefreshToken, revokedAccessPair.AccessToken)
+	if !errors.Is(err, errInjectedAuthPersistenceFailure) {
+		t.Fatalf("failed mixed logout error = %v, want injected failure", err)
+	}
+	if errors.Is(err, ErrSessionRecoveryRequired) {
+		t.Fatalf("pre-publication mixed logout error marked terminal: %v", err)
+	}
+	if _, err := service.ValidateRefreshToken(retryRefresh.RefreshToken); err != nil {
+		t.Fatalf("retry refresh token after failed mixed logout: %v", err)
+	}
+	if _, err := service.ValidateAccessToken(revokedAccessPair.AccessToken); !errors.Is(err, ErrTokenRevoked) {
+		t.Fatalf("previously revoked access token after failed logout = %v, want revoked", err)
+	}
+
+	faultFS.stage = authPersistenceNoFailure
+	if err := service.Logout(context.Background(), retryRefresh.RefreshToken, revokedAccessPair.AccessToken); err != nil {
+		t.Fatalf("retry mixed logout: %v", err)
+	}
+	restarted := newTestAuthServiceAt(t, dataDir)
+	if _, err := restarted.ValidateRefreshToken(retryRefresh.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
+		t.Fatalf("retried refresh token after restart = %v, want revoked", err)
+	}
+	if _, err := restarted.ValidateAccessToken(revokedAccessPair.AccessToken); !errors.Is(err, ErrTokenRevoked) {
+		t.Fatalf("previously revoked access token after restart = %v, want revoked", err)
+	}
+}
+
+func TestRefreshValidationWaitsForPrepublicationRollback(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	service, faultFS := newFaultInjectedAuthService(t, dataDir)
+	pair, err := service.Login(context.Background(), "admin", "correct-password")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	enteredSync := make(chan struct{})
+	releaseSync := make(chan struct{})
+	faultFS.stage = authPersistenceFailFileSync
+	faultFS.syncEntered = enteredSync
+	faultFS.syncRelease = releaseSync
+	refreshResult := make(chan error, 1)
+	go func() {
+		replacement, err := service.Refresh(context.Background(), pair.RefreshToken)
+		if replacement != nil {
+			refreshResult <- errors.New("failed refresh returned credentials")
+			return
 		}
-		if _, err := service.ValidateRefreshToken(pair.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
-			t.Fatalf("refresh token after failed persistence = %v, want in-memory revocation", err)
-		}
-		if _, err := service.ValidateAccessToken(pair.AccessToken); !errors.Is(err, ErrTokenRevoked) {
-			t.Fatalf("access token after failed persistence = %v, want in-memory revocation", err)
-		}
-	})
+		refreshResult <- err
+	}()
+	select {
+	case <-enteredSync:
+	case <-time.After(5 * time.Second):
+		close(releaseSync)
+		t.Fatal("refresh did not reach the injected sync failure")
+	}
+
+	validationStarted := make(chan struct{})
+	validationResult := make(chan error, 1)
+	go func() {
+		close(validationStarted)
+		_, err := service.ValidateRefreshToken(pair.RefreshToken)
+		validationResult <- err
+	}()
+	<-validationStarted
+	select {
+	case err := <-validationResult:
+		close(releaseSync)
+		<-refreshResult
+		t.Fatalf("validation completed before persistence rollback: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseSync)
+	if err := <-refreshResult; !errors.Is(err, errInjectedAuthPersistenceFailure) {
+		t.Fatalf("refresh failure = %v, want injected sync failure", err)
+	}
+	if err := <-validationResult; err != nil {
+		t.Fatalf("validation after rollback = %v, want valid token", err)
+	}
 }
 
 func TestConcurrentRefreshPersistsExactlyOneRotation(t *testing.T) {
@@ -362,16 +548,131 @@ func (fsys unreadableAuthStoreFS) Open(name string) (afero.File, error) {
 	return fsys.FS.Open(name)
 }
 
-type failingAuthStoreWriteFS struct {
+type authPersistenceFailureStage string
+
+const (
+	authPersistenceNoFailure          authPersistenceFailureStage = ""
+	authPersistenceFailCreate         authPersistenceFailureStage = "create"
+	authPersistenceFailChmod          authPersistenceFailureStage = "chmod"
+	authPersistenceFailWrite          authPersistenceFailureStage = "write"
+	authPersistenceFailFileSync       authPersistenceFailureStage = "file-sync"
+	authPersistenceFailFileClose      authPersistenceFailureStage = "file-close"
+	authPersistenceFailRename         authPersistenceFailureStage = "rename"
+	authPersistenceFailDirectoryOpen  authPersistenceFailureStage = "directory-open"
+	authPersistenceFailDirectorySync  authPersistenceFailureStage = "directory-sync"
+	authPersistenceFailDirectoryClose authPersistenceFailureStage = "directory-close"
+)
+
+var errInjectedAuthPersistenceFailure = errors.New("injected auth persistence failure")
+
+type authPersistenceFaultFS struct {
 	filesystem.FS
-	fail bool
+	storePath   string
+	stage       authPersistenceFailureStage
+	syncEntered chan struct{}
+	syncRelease chan struct{}
+	syncOnce    sync.Once
 }
 
-func (fsys *failingAuthStoreWriteFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	if fsys.fail && strings.Contains(filepath.Base(name), ".tmp.") {
-		return nil, errors.New("injected auth store write failure")
+func newFaultInjectedAuthService(t *testing.T, dataDir string) (*authService, *authPersistenceFaultFS) {
+	t.Helper()
+	fsys := &authPersistenceFaultFS{
+		FS:        filesystem.NewOsFS(),
+		storePath: filepath.Join(dataDir, config.AuthRevocationsFileName),
 	}
-	return fsys.FS.OpenFile(name, flag, perm)
+	svc, err := NewAuthService(fsys, testAuthConfig(t, dataDir))
+	if err != nil {
+		t.Fatalf("create auth service: %v", err)
+	}
+	auth, ok := svc.(*authService)
+	if !ok {
+		t.Fatal("auth service has an unexpected implementation")
+	}
+	return auth, fsys
+}
+
+func (fsys *authPersistenceFaultFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	temporary := isAuthRevocationTemporary(name, fsys.storePath)
+	if temporary && fsys.stage == authPersistenceFailCreate {
+		return nil, errInjectedAuthPersistenceFailure
+	}
+	file, err := fsys.FS.OpenFile(name, flag, perm)
+	if err != nil || !temporary {
+		return file, err
+	}
+	return authPersistenceFaultFile{File: file, fsys: fsys, temporary: true}, nil
+}
+
+func (fsys *authPersistenceFaultFS) Chmod(name string, mode os.FileMode) error {
+	if isAuthRevocationTemporary(name, fsys.storePath) && fsys.stage == authPersistenceFailChmod {
+		return errInjectedAuthPersistenceFailure
+	}
+	return fsys.FS.Chmod(name, mode)
+}
+
+func (fsys *authPersistenceFaultFS) Rename(oldpath, newpath string) error {
+	if isAuthRevocationTemporary(oldpath, fsys.storePath) &&
+		filepath.Clean(newpath) == filepath.Clean(fsys.storePath) &&
+		fsys.stage == authPersistenceFailRename {
+		return errInjectedAuthPersistenceFailure
+	}
+	return fsys.FS.Rename(oldpath, newpath)
+}
+
+func (fsys *authPersistenceFaultFS) Open(name string) (afero.File, error) {
+	directory := filepath.Clean(name) == filepath.Clean(filepath.Dir(fsys.storePath))
+	if directory && fsys.stage == authPersistenceFailDirectoryOpen {
+		return nil, errInjectedAuthPersistenceFailure
+	}
+	file, err := fsys.FS.Open(name)
+	if err != nil || !directory {
+		return file, err
+	}
+	return authPersistenceFaultFile{File: file, fsys: fsys, directory: true}, nil
+}
+
+func isAuthRevocationTemporary(path, storePath string) bool {
+	return filepath.Dir(filepath.Clean(path)) == filepath.Dir(filepath.Clean(storePath)) &&
+		strings.HasPrefix(filepath.Base(path), filepath.Base(storePath)+".tmp.")
+}
+
+type authPersistenceFaultFile struct {
+	afero.File
+	fsys      *authPersistenceFaultFS
+	temporary bool
+	directory bool
+}
+
+func (file authPersistenceFaultFile) Write(data []byte) (int, error) {
+	if file.temporary && file.fsys.stage == authPersistenceFailWrite {
+		return 0, errInjectedAuthPersistenceFailure
+	}
+	return file.File.Write(data)
+}
+
+func (file authPersistenceFaultFile) Sync() error {
+	if file.temporary && file.fsys.stage == authPersistenceFailFileSync {
+		if file.fsys.syncEntered != nil && file.fsys.syncRelease != nil {
+			file.fsys.syncOnce.Do(func() {
+				close(file.fsys.syncEntered)
+				<-file.fsys.syncRelease
+			})
+		}
+		return errInjectedAuthPersistenceFailure
+	}
+	if file.directory && file.fsys.stage == authPersistenceFailDirectorySync {
+		return errInjectedAuthPersistenceFailure
+	}
+	return file.File.Sync()
+}
+
+func (file authPersistenceFaultFile) Close() error {
+	err := file.File.Close()
+	if file.temporary && file.fsys.stage == authPersistenceFailFileClose ||
+		file.directory && file.fsys.stage == authPersistenceFailDirectoryClose {
+		return errors.Join(err, errInjectedAuthPersistenceFailure)
+	}
+	return err
 }
 
 func testAuthConfig(t *testing.T, dataDir string) AuthServiceConfig {

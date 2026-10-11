@@ -6,9 +6,9 @@ Use this workflow to keep stable releases and nightly builds in separate GHCR pa
 
 ### Fixes
 
-- Logout and refresh-token rotation now remain effective after server restarts with the same JWT signing secret. Revocations are stored in `auth-revocations.json` under `data_dir`.
-- Keep `data_dir` persistent and run one server process per directory. Corrupt or unreadable revocation state prevents startup; storage errors prevent successful logout or refresh.
-- Revocations lost before this update cannot be recovered. Rotate `BOXBOX_JWT_SECRET` once on upgrade if all previously issued tokens must be invalidated.
+- Refresh-token rotation and logout persist token revocations in `auth-revocations.json` under `data_dir`. Revocations survive restarts when the server keeps the same signing secret and current data.
+- Keep `data_dir` on persistent storage and use one server process per directory. Corrupt, unreadable, or unsupported stores stop startup. A write failure before publication returns retryable `500` without changing the refresh cookie. If a durability check fails after publication, the server returns `401 SESSION_RECOVERY_REQUIRED`, clears the cookie, and requires sign-in because it cannot confirm the installed snapshot will survive a crash.
+- Missing or deleted stores, older restored backups, or downgrades to versions that do not check this store can revive revoked tokens. Rotate `BOXBOX_JWT_SECRET` after losing or rolling back the store. Revocations from before this update cannot be recovered; rotate the secret once after upgrading if those tokens must be invalidated.
 
 ## v0.3.0 Release Notes
 

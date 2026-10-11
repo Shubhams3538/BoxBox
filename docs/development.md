@@ -128,6 +128,26 @@ bun run --cwd frontend check
 bun run --cwd frontend build
 ```
 
+## Check auth revocation persistence
+
+On Linux, run the production-mode auth smoke check from the repository root:
+
+```bash
+bun scripts/check-auth-revocations.ts
+```
+
+The script builds the Go server when you omit `--binary`. It starts the server against temporary storage and prints a results table.
+
+The check covers restart persistence, refresh and logout storage failures, protected streams, WebSocket handshakes, store corruption, and file permissions. Missing-store and older-store behavior appear as known limitations, not passing security checks.
+
+To check an existing server binary, pass its path:
+
+```bash
+bun scripts/check-auth-revocations.ts --binary ./dist/boxbox
+```
+
+The `--dev` server mode still initializes `data_dir`; configure a writable directory even though authentication is disabled.
+
 ## Backend Patterns
 
 Use the existing Handler -> Service -> Model/Filesystem shape:

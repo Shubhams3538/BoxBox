@@ -50,7 +50,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 POST /api/v1/auth/refresh
 ```
 
-The request has no body. The server reads the `boxbox_refresh` cookie and returns a new `accessToken` and `expiresAt`.
+The request has no body. The server reads the `boxbox_refresh` cookie, returns a new `accessToken` and `expiresAt`, and rotates the refresh cookie.
 
 ### Logout
 
@@ -59,7 +59,11 @@ POST /api/v1/auth/logout
 Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 ```
 
-The request has no body. Logout needs a valid refresh cookie, otherwise it returns `401` with `TOKEN_INVALID`. The server revokes that refresh token and clears the cookie. It also revokes the access token when the request carries a valid one for the same user. Without one, the access token stays valid until it expires.
+The request has no body. Logout needs a valid refresh cookie. Without one, it returns `401` with `TOKEN_INVALID` and clears the cookie. On success, the server revokes the refresh token and clears the cookie. It also revokes the access token when the request carries a valid one for the same user. Without one, the access token stays valid until it expires.
+
+Refresh and logout return replacement credentials or success only after the revocation snapshot is durably published. If persistence fails before publication, the server returns `500 INTERNAL_ERROR` without a `Set-Cookie` header. The existing refresh cookie remains unchanged, so the client can retry.
+
+If the server installs the new snapshot but a later durability check fails, the server cannot confirm that the snapshot will survive a crash. It returns `401 SESSION_RECOVERY_REQUIRED` and clears the refresh cookie. Sign in again. Logout did not succeed in this case.
 
 ## Files
 
@@ -548,4 +552,6 @@ Errors use:
 }
 ```
 
-Common codes include `VALIDATION_ERROR`, `UNAUTHORIZED`, `TOKEN_INVALID`, `ACCESS_DENIED`, `READ_ONLY`, `INVALID_PATH`, `NOT_FOUND`, `CONFLICT`, `JOB_NOT_FOUND`, `CHECKSUM_MISMATCH`, and `INTERNAL_ERROR`.
+Common codes include `VALIDATION_ERROR`, `UNAUTHORIZED`, `TOKEN_INVALID`, `SESSION_RECOVERY_REQUIRED`, `ACCESS_DENIED`, `READ_ONLY`, `INVALID_PATH`, `NOT_FOUND`, `CONFLICT`, `JOB_NOT_FOUND`, `CHECKSUM_MISMATCH`, and `INTERNAL_ERROR`.
+
+Auth storage errors before snapshot publication return `500` with `INTERNAL_ERROR`. The server preserves the refresh cookie so you can retry. `SESSION_RECOVERY_REQUIRED` returns `401` and means you must sign in again. Logout does not count as successful in this case.

@@ -8,9 +8,14 @@ import {
 	refresh as apiRefresh,
 	isAuthenticated as hasAccessToken
 } from '$lib/api/auth';
+import { ApiRequestError, AuthSessionClosedError } from '$lib/api/client';
 import { CONFIG } from '$lib/config';
 import { settingsStore } from './settings.svelte';
 import { resetShareWallpaperLoginSync } from '$lib/utils/wallpaperSync';
+
+type AuthAlert =
+	| { kind: 'transient'; source: 'refresh' | 'logout'; message: string }
+	| { kind: 'terminal'; message: string };
 
 class AuthStore {
 	isAuthenticated = $state(false);
@@ -18,20 +23,28 @@ class AuthStore {
 	isDevelopment = $state(false);
 	isLoading = $state(false);
 	error = $state<string | null>(null);
+	authAlert = $state<AuthAlert | null>(null);
 
 	private refreshInterval: ReturnType<typeof setInterval> | null = null;
+	private isRestoringSession = false;
 
 	/** Restores the session from the refresh-token cookie, if there is one. */
 	async initialize(): Promise<void> {
 		const isDevelopment =
 			document.querySelector('meta[name="boxbox-dev-mode"]')?.getAttribute('content') === 'true';
 		let isAuthenticated = hasAccessToken();
+
 		if (!isDevelopment && !isAuthenticated) {
+			this.isRestoringSession = true;
 			try {
 				await apiRefresh();
 				isAuthenticated = true;
-			} catch {
+				this.clearTransientAuthAlert();
+			} catch (error) {
 				isAuthenticated = false;
+				this.handleRefreshFailure(error, 'restore');
+			} finally {
+				this.isRestoringSession = false;
 			}
 		}
 
@@ -50,6 +63,7 @@ class AuthStore {
 			await apiLogin(username, password);
 			this.isAuthenticated = true;
 			this.isLoading = false;
+			this.authAlert = null;
 			this.startTokenRefresh();
 			void settingsStore.initialize();
 			return true;
@@ -60,26 +74,94 @@ class AuthStore {
 		}
 	}
 
-	async logout(): Promise<void> {
+	async logout(): Promise<boolean> {
 		this.stopTokenRefresh();
+
 		try {
 			await apiLogout();
-		} catch {
-			// The local session is cleared either way.
+			this.reset();
+			this.authAlert = null;
+			return true;
+		} catch (error) {
+			if (isTerminalAuthFailure(error)) {
+				this.endSession(error);
+				return true;
+			}
+
+			if (this.isAuthenticated) {
+				if (!this.isDevelopment) this.startTokenRefresh();
+				this.authAlert = {
+					kind: 'transient',
+					source: 'logout',
+					message: 'Unable to log out. Your session is still active. Please try again.'
+				};
+			} else {
+				this.authAlert = {
+					kind: 'transient',
+					source: 'logout',
+					message: 'Unable to log out. Please try again.'
+				};
+			}
+			return false;
 		}
-		this.reset();
 	}
 
 	clearError(): void {
 		this.error = null;
 	}
 
-	private reset(error: string | null = null): void {
+	clearAuthAlert(): void {
+		this.authAlert = null;
+	}
+
+	handleRefreshFailure(error: unknown, action: 'restore' | 'refresh'): void {
+		if (error instanceof AuthSessionClosedError) return;
+		const isRestoreAttempt =
+			action === 'restore' || this.isRestoringSession || !this.isAuthenticated;
+		if (isTerminalAuthFailure(error)) {
+			if (isRestoreAttempt && error.code !== 'SESSION_RECOVERY_REQUIRED') return;
+			if (!this.isAuthenticated && this.authAlert?.kind === 'terminal') return;
+			this.endSession(error);
+			return;
+		}
+
+		this.authAlert = {
+			kind: 'transient',
+			source: 'refresh',
+			message: isRestoreAttempt
+				? 'Unable to restore your session right now. Please try again.'
+				: "Unable to refresh your session right now. Your session is still active; we'll retry."
+		};
+	}
+
+	handleRefreshSuccess(): void {
+		this.clearTransientAuthAlert();
+	}
+
+	private endSession(error: ApiRequestError): void {
+		this.stopTokenRefresh();
+		this.reset();
+		this.authAlert = {
+			kind: 'terminal',
+			message:
+				error.code === 'SESSION_RECOVERY_REQUIRED'
+					? 'Your session could not be safely restored. Please sign in again.'
+					: 'Session expired. Please log in again.'
+		};
+	}
+
+	private clearTransientAuthAlert(): void {
+		if (this.authAlert?.kind === 'transient' && this.authAlert.source === 'refresh') {
+			this.authAlert = null;
+		}
+	}
+
+	private reset(): void {
 		resetShareWallpaperLoginSync();
 		this.isAuthenticated = false;
 		this.isDevelopment = false;
 		this.isLoading = false;
-		this.error = error;
+		this.error = null;
 	}
 
 	private startTokenRefresh(): void {
@@ -87,9 +169,9 @@ class AuthStore {
 		this.refreshInterval = setInterval(async () => {
 			try {
 				await apiRefresh();
-			} catch {
-				this.stopTokenRefresh();
-				this.reset('Session expired. Please log in again.');
+				this.clearTransientAuthAlert();
+			} catch (error) {
+				this.handleRefreshFailure(error, 'refresh');
 			}
 		}, CONFIG.auth.tokenRefreshIntervalMs);
 	}
@@ -100,6 +182,10 @@ class AuthStore {
 			this.refreshInterval = null;
 		}
 	}
+}
+
+function isTerminalAuthFailure(error: unknown): error is ApiRequestError {
+	return error instanceof ApiRequestError && error.status === 401;
 }
 
 export const authStore = new AuthStore();

@@ -16,6 +16,14 @@ HOST_PORT=8081
 docker compose up -d
 ```
 
+## Logout or Refresh Fails
+
+For refresh or logout, a storage `500` before publication leaves the refresh cookie unchanged. Do not clear it. Check that the configured `data_dir` is writable and backed by persistent storage, then retry the action.
+
+`401 SESSION_RECOVERY_REQUIRED` means the server installed the new snapshot but a later durability check failed. It clears the refresh cookie because it cannot confirm the snapshot will survive a crash. Sign in again. A logout that returns this code did not report success.
+
+If the server stops at startup with a revocation-store error, do not delete `auth-revocations.json` or let the application create a new store. Check the server logs and the `data_dir` mount, permissions, and backup state. Restore a known-current copy of the store if available. A missing, deleted, or older store can make revoked tokens valid again. If the store was lost or rolled back, rotate `BOXBOX_JWT_SECRET` before exposing the server.
+
 ## Unreachable After Upgrading to v0.3.0
 
 `v0.3.0` changed the default container port from `80` to `8080`. If the container is healthy but the browser or reverse proxy cannot reach it, the port mapping and `config.yaml` disagree. Check which port the server bound:
