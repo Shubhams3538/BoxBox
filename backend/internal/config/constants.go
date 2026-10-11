@@ -135,6 +135,9 @@ const (
 	// SharesFileName is the filename for storing share link records
 	SharesFileName = "shares.json"
 
+	// AuthRevocationsFileName is the filename for persisted JWT revocations.
+	AuthRevocationsFileName = "auth-revocations.json"
+
 	// WallpapersDirName is the data subdirectory holding each user's wallpaper,
 	// which share pages show behind the shared files.
 	WallpapersDirName = "wallpapers"

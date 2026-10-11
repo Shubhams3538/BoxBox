@@ -22,6 +22,11 @@ BoxBox uses JWT access and refresh tokens:
 - Access tokens expire after 15 minutes.
 - Refresh tokens expire after 7 days and are rotated in an HttpOnly, SameSite=Strict cookie.
 - Access tokens stay in browser memory and logout revokes both current tokens.
+- Logout and refresh rotation persist revocations in `auth-revocations.json` under `data_dir`. The store contains refresh-token SHA-256 hashes and access-token IDs, never raw JWTs.
+- The service restricts the store directory to `0700` and the file to `0600`.
+- A missing store is created at startup. A corrupt or unreadable store stops startup, and storage errors prevent logout or refresh from reporting success.
+- Keep `data_dir` on persistent storage. Deleting the revocation store or restoring an older copy can make revoked tokens usable again; rotate `BOXBOX_JWT_SECRET` when resetting this state.
+- Only one server process can use a `data_dir`; the file store does not coordinate separate processes.
 - Auth endpoints are rate-limited per client IP.
 - Repeated failures trigger exponential per-account lockouts.
 
@@ -139,6 +144,7 @@ Share links expose one file or a folder tree to anyone holding the token URL:
 ## Operational Checklist
 
 - Rotate `BOXBOX_JWT_SECRET` if it was ever committed or shared.
+- After upgrading from a version that kept revocations only in memory, rotate `BOXBOX_JWT_SECRET` once if you need to invalidate every token that may have been revoked before a restart. Those old revocations cannot be recovered.
 - Rotate admin passwords after test deployments.
 - Review mounted paths after adding new host disks.
 - Check logs for repeated failed logins or path validation errors.

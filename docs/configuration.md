@@ -66,6 +66,7 @@ mount_points:
 | `port` | `8080` | HTTP port inside the container or process. |
 | `host` | `0.0.0.0` | Bind address. |
 | `jwt_secret` | Required | JWT signing secret of at least 32 bytes. |
+| `data_dir` | `/data` | Directory for persisted settings, shares, and JWT revocations. Use one server process per directory. |
 | `rate_limit_rps` | `2` | Auth endpoint requests per second per client IP. |
 | `allowed_origins` | `[]` | WebSocket origin allow-list. Empty enforces same-origin; `*` explicitly allows all. |
 | `trusted_proxies` | `[]` | Proxy IPs/CIDRs allowed to supply client-IP headers. |
@@ -106,6 +107,7 @@ Environment overrides use the `BOXBOX_` prefix:
 | `BOXBOX_ALLOWED_ORIGINS` | `allowed_origins`, comma-separated |
 | `BOXBOX_TRUSTED_PROXIES` | `trusted_proxies`, comma-separated CIDRs |
 | `BOXBOX_ALLOW_ROOT_MOUNT` | `allow_root_mount` |
+| `BOXBOX_DATA_DIR` | `data_dir` |
 | `BOXBOX_USERS_<username>` | `users.<username>` |
 
 `CONFIG_PATH` is also supported as a convenience for selecting the YAML file path.

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jR4dh3y/BoxBox/backend/internal/pkg/filesystem"
 	"github.com/jR4dh3y/BoxBox/backend/internal/service"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -18,10 +19,14 @@ func TestAuthRefreshTokenUsesHttpOnlyCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	auth := service.NewAuthService(service.AuthServiceConfig{
+	auth, err := service.NewAuthService(filesystem.NewOsFS(), service.AuthServiceConfig{
+		DataDir:   t.TempDir(),
 		JWTSecret: "0123456789abcdef0123456789abcdef",
 		Users:     map[string]string{"admin": string(hash)},
 	})
+	if err != nil {
+		t.Fatalf("create auth service: %v", err)
+	}
 	handler := NewAuthHandler(auth)
 
 	loginRequest := httptest.NewRequest(

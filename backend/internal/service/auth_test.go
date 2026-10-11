@@ -3,20 +3,17 @@ package service
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/jR4dh3y/BoxBox/backend/internal/config"
+	"github.com/jR4dh3y/BoxBox/backend/internal/pkg/filesystem"
 	"golang.org/x/crypto/bcrypt"
 )
 
 func TestAuthTokenTypesAreEnforced(t *testing.T) {
-	svc := NewAuthService(AuthServiceConfig{
-		JWTSecret: "test-secret",
-		Users: map[string]string{
-			"admin": testPasswordHash(t, "correct-password"),
-		},
-	})
+	svc := newTestAuthService(t)
 
 	pair, err := svc.Login(context.Background(), "admin", "correct-password")
 	if err != nil {
@@ -39,12 +36,7 @@ func TestAuthTokenTypesAreEnforced(t *testing.T) {
 }
 
 func TestRefreshRevokesOldRefreshToken(t *testing.T) {
-	svc := NewAuthService(AuthServiceConfig{
-		JWTSecret: "test-secret",
-		Users: map[string]string{
-			"admin": testPasswordHash(t, "correct-password"),
-		},
-	})
+	svc := newTestAuthService(t)
 
 	pair, err := svc.Login(context.Background(), "admin", "correct-password")
 	if err != nil {
@@ -60,12 +52,7 @@ func TestRefreshRevokesOldRefreshToken(t *testing.T) {
 }
 
 func TestLogoutRevokesCurrentAccessToken(t *testing.T) {
-	svc := NewAuthService(AuthServiceConfig{
-		JWTSecret: "test-secret",
-		Users: map[string]string{
-			"admin": testPasswordHash(t, "correct-password"),
-		},
-	})
+	svc := newTestAuthService(t)
 	pair, err := svc.Login(context.Background(), "admin", "correct-password")
 	if err != nil {
 		t.Fatal(err)
@@ -79,12 +66,7 @@ func TestLogoutRevokesCurrentAccessToken(t *testing.T) {
 }
 
 func TestLoginUsesAccountLockoutAfterRepeatedFailures(t *testing.T) {
-	svc := NewAuthService(AuthServiceConfig{
-		JWTSecret: "test-secret",
-		Users: map[string]string{
-			"admin": testPasswordHash(t, "correct-password"),
-		},
-	}).(*authService)
+	svc := newTestAuthService(t)
 
 	for range config.LoginLockoutThreshold {
 		_, _ = svc.Login(context.Background(), "admin", "wrong-password")
@@ -101,6 +83,24 @@ func TestLoginUsesAccountLockoutAfterRepeatedFailures(t *testing.T) {
 	if _, err := svc.Login(context.Background(), "admin", "correct-password"); err != nil {
 		t.Fatalf("account did not recover after lockout: %v", err)
 	}
+}
+
+func newTestAuthService(t *testing.T) *authService {
+	t.Helper()
+	return newTestAuthServiceAt(t, filepath.Join(t.TempDir(), "data"))
+}
+
+func newTestAuthServiceAt(t *testing.T, dataDir string) *authService {
+	t.Helper()
+	svc, err := NewAuthService(filesystem.NewOsFS(), testAuthConfig(t, dataDir))
+	if err != nil {
+		t.Fatalf("create auth service: %v", err)
+	}
+	auth, ok := svc.(*authService)
+	if !ok {
+		t.Fatal("auth service has an unexpected implementation")
+	}
+	return auth
 }
 
 func testPasswordHash(t *testing.T, password string) string {

@@ -104,11 +104,14 @@ The frontend uses a same-origin API base of `/api/v1`. In production the browser
 
 Most server state is intentionally lightweight:
 
-- Auth refresh-token revocations are in memory.
+- Auth refresh-token and access-token revocations are persisted under `/data/auth-revocations.json`.
+- The versioned JSON snapshot stores SHA-256 refresh-token hashes and access-token IDs with their expiry times, never raw JWTs.
 - Jobs are in memory and cleaned after a retention period.
 - Upload sessions are in memory with temporary chunks on disk.
 - Custom drive names are persisted under `/data/drive-names.json`.
 - Files themselves remain on mounted host paths.
+
+The revocation snapshot serializes writes within the server process. Only one server process can use a data directory; the file store does not coordinate separate processes.
 
 ## Security Boundaries
 

@@ -6,12 +6,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"maps"
+	"path/filepath"
 	"sync"
 	"time"
 	"uuid"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jR4dh3y/BoxBox/backend/internal/config"
+	"github.com/jR4dh3y/BoxBox/backend/internal/pkg/filesystem"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -65,7 +68,9 @@ type authService struct {
 	refreshTokenExpiry time.Duration
 	users              map[string]string // username -> bcrypt password hash
 	dummyPasswordHash  []byte
-	revokedRefresh     map[[sha256.Size]byte]time.Time
+	fs                 filesystem.FS
+	revocationsPath    string
+	revokedRefresh     map[string]time.Time
 	revokedAccess      map[string]time.Time
 	loginFailures      map[string]loginFailure
 	mu                 sync.RWMutex
@@ -78,16 +83,20 @@ type loginFailure struct {
 	lockedUntil time.Time
 }
 
-// AuthServiceConfig holds configuration for the auth service
+// AuthServiceConfig holds configuration for the auth service.
 type AuthServiceConfig struct {
+	DataDir            string
 	JWTSecret          string
 	AccessTokenExpiry  time.Duration
 	RefreshTokenExpiry time.Duration
 	Users              map[string]string // username -> bcrypt password hash
 }
 
-// NewAuthService creates a new authentication service
-func NewAuthService(cfg AuthServiceConfig) AuthService {
+// NewAuthService creates a new authentication service and loads its revocations.
+func NewAuthService(fsys filesystem.FS, cfg AuthServiceConfig) (AuthService, error) {
+	if cfg.DataDir == "" {
+		cfg.DataDir = config.DefaultDataDir
+	}
 	if cfg.AccessTokenExpiry == 0 {
 		cfg.AccessTokenExpiry = config.DefaultAccessTokenExpiry
 	}
@@ -107,17 +116,23 @@ func NewAuthService(cfg AuthServiceConfig) AuthService {
 		dummyHash, _ = bcrypt.GenerateFromPassword([]byte("boxbox-invalid-user-password"), bcrypt.DefaultCost)
 	}
 
-	return &authService{
+	svc := &authService{
 		jwtSecret:          []byte(cfg.JWTSecret),
 		accessTokenExpiry:  cfg.AccessTokenExpiry,
 		refreshTokenExpiry: cfg.RefreshTokenExpiry,
 		users:              cfg.Users,
 		dummyPasswordHash:  dummyHash,
-		revokedRefresh:     make(map[[sha256.Size]byte]time.Time),
+		fs:                 fsys,
+		revocationsPath:    filepath.Join(cfg.DataDir, config.AuthRevocationsFileName),
+		revokedRefresh:     make(map[string]time.Time),
 		revokedAccess:      make(map[string]time.Time),
 		loginFailures:      make(map[string]loginFailure),
 		stopCh:             make(chan struct{}),
 	}
+	if err := svc.loadRevocations(); err != nil {
+		return nil, err
+	}
+	return svc, nil
 }
 
 // Login authenticates a user and returns a token pair
@@ -171,17 +186,25 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 
 	// Rotate once. The check-and-revoke is atomic so concurrent replays cannot
 	// both mint a new token pair.
-	tokenHash := sha256.Sum256([]byte(refreshToken))
+	tokenHash := refreshTokenHash(refreshToken)
 	s.mu.Lock()
 	if _, revoked := s.revokedRefresh[tokenHash]; revoked {
 		s.mu.Unlock()
 		return nil, ErrTokenRevoked
 	}
-	s.revokedRefresh[tokenHash] = claims.ExpiresAt.Time
-	s.mu.Unlock()
 
-	// Generate new token pair
-	return s.generateTokenPair(claims.Username)
+	pair, err := s.generateTokenPair(claims.Username)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	s.revokedRefresh[tokenHash] = claims.ExpiresAt.Time
+	err = s.persistRevocationsLocked()
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return pair, nil
 }
 
 // ValidateToken validates a JWT token and returns the claims
@@ -204,7 +227,7 @@ func (s *authService) ValidateAccessToken(tokenString string) (*Claims, error) {
 }
 
 func (s *authService) ValidateRefreshToken(tokenString string) (*Claims, error) {
-	tokenHash := sha256.Sum256([]byte(tokenString))
+	tokenHash := refreshTokenHash(tokenString)
 	s.mu.RLock()
 	_, revoked := s.revokedRefresh[tokenHash]
 	s.mu.RUnlock()
@@ -228,7 +251,7 @@ func (s *authService) validateToken(tokenString string, expectedType TokenType) 
 	}
 
 	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid {
+	if !ok || !token.Valid || claims.ExpiresAt == nil || claims.ExpiresAt.Time.IsZero() {
 		return nil, ErrInvalidToken
 	}
 	if expectedType != "" && claims.TokenType != expectedType {
@@ -245,24 +268,27 @@ func (s *authService) Logout(ctx context.Context, refreshToken, accessToken stri
 		return err
 	}
 
-	refreshHash := sha256.Sum256([]byte(refreshToken))
+	refreshHash := refreshTokenHash(refreshToken)
+	var accessClaims *Claims
+	if accessToken != "" {
+		claims, err := s.validateToken(accessToken, TokenTypeAccess)
+		if err == nil && claims.Username == refreshClaims.Username && claims.ID != "" {
+			accessClaims = claims
+		}
+	}
+
 	s.mu.Lock()
 	if _, revoked := s.revokedRefresh[refreshHash]; revoked {
 		s.mu.Unlock()
 		return ErrTokenRevoked
 	}
 	s.revokedRefresh[refreshHash] = refreshClaims.ExpiresAt.Time
-	s.mu.Unlock()
-
-	if accessToken != "" {
-		accessClaims, err := s.validateToken(accessToken, TokenTypeAccess)
-		if err == nil && accessClaims.Username == refreshClaims.Username && accessClaims.ID != "" {
-			s.mu.Lock()
-			s.revokedAccess[accessClaims.ID] = accessClaims.ExpiresAt.Time
-			s.mu.Unlock()
-		}
+	if accessClaims != nil {
+		s.revokedAccess[accessClaims.ID] = accessClaims.ExpiresAt.Time
 	}
-	return nil
+	err = s.persistRevocationsLocked()
+	s.mu.Unlock()
+	return err
 }
 
 // generateTokenPair creates a new access and refresh token pair
@@ -334,12 +360,14 @@ func generateTokenID() string {
 
 // CleanupExpiredTokens removes expired tokens from the revoked list
 // Should be called periodically to prevent memory growth
-func (s *authService) CleanupExpiredTokens() {
+func (s *authService) CleanupExpiredTokens() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	maps.DeleteFunc(s.revokedRefresh, func(_ [sha256.Size]byte, expiresAt time.Time) bool {
+	refreshCount := len(s.revokedRefresh)
+	accessCount := len(s.revokedAccess)
+	maps.DeleteFunc(s.revokedRefresh, func(_ string, expiresAt time.Time) bool {
 		return !expiresAt.After(now)
 	})
 	maps.DeleteFunc(s.revokedAccess, func(_ string, expiresAt time.Time) bool {
@@ -348,6 +376,10 @@ func (s *authService) CleanupExpiredTokens() {
 	maps.DeleteFunc(s.loginFailures, func(_ string, failure loginFailure) bool {
 		return failure.count == 0 || now.Sub(failure.lockedUntil) > config.LoginLockoutMaxDelay
 	})
+	if refreshCount != len(s.revokedRefresh) || accessCount != len(s.revokedAccess) {
+		return s.persistRevocationsLocked()
+	}
+	return nil
 }
 
 // StartCleanup starts the periodic cleanup of expired tokens
@@ -363,7 +395,9 @@ func (s *authService) StartCleanup(ctx context.Context) {
 			case <-s.stopCh:
 				return
 			case <-ticker.C:
-				s.CleanupExpiredTokens()
+				if err := s.CleanupExpiredTokens(); err != nil {
+					log.Warn().Err(err).Msg("Could not persist auth token cleanup")
+				}
 			}
 		}
 	})

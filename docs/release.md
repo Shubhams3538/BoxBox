@@ -2,6 +2,14 @@
 
 Use this workflow to keep stable releases and nightly builds in separate GHCR packages while still getting automatic nightly and branch images for testing.
 
+## Unreleased
+
+### Fixes
+
+- Logout and refresh-token rotation now remain effective after server restarts with the same JWT signing secret. Revocations are stored in `auth-revocations.json` under `data_dir`.
+- Keep `data_dir` persistent and run one server process per directory. Corrupt or unreadable revocation state prevents startup; storage errors prevent successful logout or refresh.
+- Revocations lost before this update cannot be recovered. Rotate `BOXBOX_JWT_SECRET` once on upgrade if all previously issued tokens must be invalidated.
+
 ## v0.3.0 Release Notes
 
 `v0.3.0` adds file and folder sharing, folder uploads, separate Drives and Places in the sidebar, and a redesigned share page. It also moves the default container port from `80` to `8080`.
