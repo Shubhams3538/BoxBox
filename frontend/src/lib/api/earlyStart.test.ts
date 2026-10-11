@@ -164,7 +164,7 @@ describe('the shell script', () => {
 	test('a refused refresh means no listing is requested', async () => {
 		const { win, calls } = runShell({ refresh: () => new Response('no', { status: 401 }) });
 		assert.equal(await win.boxboxEarly?.list.response, null);
-		assert.equal(await win.boxboxEarly?.session, null);
+		assert.deepEqual(await win.boxboxEarly?.session, { rejected: true });
 		assert.equal(listCalls(calls).length, 0);
 	});
 
@@ -319,8 +319,15 @@ describe('restoreSession', () => {
 		assert.deepEqual(requests, []);
 	});
 
+	test('a 401 from the shell is final: a logged-out visit makes one refresh request', async () => {
+		const { win, calls } = runShell({ refresh: () => new Response('no', { status: 401 }) });
+		await assert.rejects(restoreSession(createEarlyStart(() => win)));
+		assert.equal(refreshCalls(calls).length, 1);
+		assert.deepEqual(requests, []);
+	});
+
 	test('refreshes by itself when the shell started nothing or its refresh failed', async () => {
-		const failed = runShell({ refresh: () => new Response('no', { status: 401 }) });
+		const failed = runShell({ refresh: () => new Response('no', { status: 503 }) });
 		assert.equal(
 			(await restoreSession(createEarlyStart(() => failed.win))).accessToken,
 			'app-token'

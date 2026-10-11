@@ -54,12 +54,14 @@ export function refresh(): Promise<LoginResponse> {
 
 /**
  * Restore the session when the page loads. Uses the refresh the page shell already started, if it
- * did, and asks the server otherwise. Never both: each refresh rotates the refresh token.
+ * did, and asks the server otherwise. Never both: each refresh rotates the refresh token. A 401 from
+ * the shell's refresh is final, so a logged-out visit makes one refresh request, not two.
  */
 export async function restoreSession(
 	source: EarlyStartSource = earlyStart
 ): Promise<LoginResponse> {
 	const early = await source.takeSession();
+	if (early === 'rejected') throw new Error('No valid session');
 	if (!early) return refresh();
 	setAccessToken(early.accessToken);
 	return early;

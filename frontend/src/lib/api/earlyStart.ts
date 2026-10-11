@@ -4,7 +4,10 @@ import type { FileList } from './files';
 
 /** What `static/early-fetch.js` starts while the app's JavaScript is still downloading. */
 interface EarlyStart {
-	/** The page-load token refresh. `null` when the server has no authentication. */
+	/**
+	 * The page-load token refresh: the tokens, `{ rejected: true }` when the server answered 401 (no
+	 * valid session), anything else when it failed. `null` when the server has no authentication.
+	 */
 	session: Promise<unknown> | null;
 	list: { url: string; startedAt: number; response: Promise<Response | null> };
 }
@@ -14,6 +17,15 @@ declare global {
 		/** `undefined` until early-fetch.js runs; `null` once the app has taken over. */
 		boxboxEarly?: EarlyStart | null;
 	}
+}
+
+/** What `takeSession` found: the tokens, a definite "not signed in", or nothing usable. */
+export type EarlySession = AccessTokenResponse | 'rejected' | null;
+
+function isRejected(value: unknown): boolean {
+	return (
+		typeof value === 'object' && value !== null && 'rejected' in value && value.rejected === true
+	);
 }
 
 function isAccessTokenResponse(value: unknown): value is AccessTokenResponse {
@@ -47,11 +59,12 @@ export function createEarlyStart(win: () => Pick<Window, 'boxboxEarly'>) {
 	}
 
 	return {
-		async takeSession(): Promise<AccessTokenResponse | null> {
+		async takeSession(): Promise<EarlySession> {
 			claim();
 			const pending = session;
 			session = null;
 			const tokens = await pending;
+			if (isRejected(tokens)) return 'rejected';
 			return isAccessTokenResponse(tokens) ? tokens : null;
 		},
 

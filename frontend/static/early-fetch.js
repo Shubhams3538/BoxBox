@@ -47,7 +47,9 @@
 	const session = isDevelopment
 		? null
 		: fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'same-origin' })
-				.then((response) => (response.ok ? response.json() : null))
+				.then((response) =>
+					response.ok ? response.json() : response.status === 401 ? { rejected: true } : null
+				)
 				.catch(() => null);
 
 	window.boxboxEarly = {
