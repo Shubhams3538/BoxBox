@@ -164,7 +164,8 @@ describe('the shell script', () => {
 	test('a refused refresh means no listing is requested', async () => {
 		const { win, calls } = runShell({ refresh: () => new Response('no', { status: 401 }) });
 		assert.equal(await win.boxboxEarly?.list.response, null);
-		assert.deepEqual(await win.boxboxEarly?.session, { rejected: true });
+		// The shell runs in another realm, so compare by value, not prototype.
+		assert.equal(JSON.stringify(await win.boxboxEarly?.session), '{"rejected":true}');
 		assert.equal(listCalls(calls).length, 0);
 	});
 
