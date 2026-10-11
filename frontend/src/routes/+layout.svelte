@@ -232,7 +232,25 @@
 					aria-live="assertive"
 				>
 					<AlertTriangle size={18} class="mt-0.5 shrink-0" />
-					<p class="m-0 flex-1 text-sm">{authStore.authAlert.message}</p>
+					<div class="flex-1 space-y-2">
+						<p class="m-0 text-sm">{authStore.authAlert.message}</p>
+						{#if authStore.authAlert.kind === 'transient' && authStore.authAlert.source === 'restore'}
+							<Button
+								type="button"
+								variant="secondary"
+								size="sm"
+								disabled={authStore.isRestoringSession || authStore.isLoading}
+								onclick={() => authStore.initialize()}
+							>
+								{#if authStore.isRestoringSession}
+									<Spinner size="sm" />
+									<span>Retrying...</span>
+								{:else}
+									<span>Retry session</span>
+								{/if}
+							</Button>
+						{/if}
+					</div>
 					<button
 						type="button"
 						class="shrink-0 rounded p-0.5 transition-colors hover:bg-surface-elevated"

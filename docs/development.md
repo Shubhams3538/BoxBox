@@ -138,6 +138,8 @@ bun scripts/check-auth-sessions.ts
 
 The script builds the Go server when you omit `--binary`. It starts the server with temporary storage and prints a results table.
 
+The entry point owns CLI handling, orchestration, and cleanup. Focused helpers and session, storage-failure, strict-store, backup-rollback, and missing-store scenarios live in `scripts/auth-smoke/`. Strict-store checks require the corresponding auth-session-store initialization diagnostic; an unrelated startup error is not a pass.
+
 The smoke check covers legacy tokens without a session ID, unknown session IDs, independent logins, access tokens across refresh rotations and logout, concurrent refresh, private streaming credentials in headers and query parameters, WebSocket authentication, login/refresh/logout storage failures and retry, previous-session preservation, a missing registry file or a valid snapshot with an empty `sessions` map after restart, strict startup rejection of malformed or unsafe registries, and file permissions. It also checks that the registry contains no raw JWTs.
 
 The script labels two outcomes as expected limitations, not passes. Deleting the registry file while the server runs leaves its in-memory sessions active, and a later write can persist them again. Restoring a valid older backup can revive its sessions and current refresh tokens. The smoke check does not claim to test physical power-loss durability.

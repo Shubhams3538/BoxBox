@@ -14,7 +14,7 @@ import { settingsStore } from './settings.svelte';
 import { resetShareWallpaperLoginSync } from '$lib/utils/wallpaperSync';
 
 type AuthAlert =
-	| { kind: 'transient'; source: 'refresh' | 'logout'; message: string }
+	| { kind: 'transient'; source: 'restore' | 'refresh' | 'logout'; message: string }
 	| { kind: 'terminal'; message: string };
 
 class AuthStore {
@@ -22,40 +22,44 @@ class AuthStore {
 	/** True when the server runs with the --dev authentication bypass. */
 	isDevelopment = $state(false);
 	isLoading = $state(false);
+	isRestoringSession = $state(false);
 	error = $state<string | null>(null);
 	authAlert = $state<AuthAlert | null>(null);
 
 	private refreshInterval: ReturnType<typeof setInterval> | null = null;
-	private isRestoringSession = false;
 
 	/** Restores the session from the refresh-token cookie, if there is one. */
 	async initialize(): Promise<void> {
-		const isDevelopment =
-			document.querySelector('meta[name="boxbox-dev-mode"]')?.getAttribute('content') === 'true';
-		let isAuthenticated = hasAccessToken();
+		if (this.isRestoringSession || this.isLoading) return;
+		this.isRestoringSession = true;
+		try {
+			const isDevelopment =
+				document.querySelector('meta[name="boxbox-dev-mode"]')?.getAttribute('content') === 'true';
+			let isAuthenticated = hasAccessToken();
 
-		if (!isDevelopment && !isAuthenticated) {
-			this.isRestoringSession = true;
-			try {
-				await apiRefresh();
-				isAuthenticated = true;
-				this.clearTransientAuthAlert();
-			} catch (error) {
-				isAuthenticated = false;
-				this.handleRefreshFailure(error, 'restore');
-			} finally {
-				this.isRestoringSession = false;
+			if (!isDevelopment && !isAuthenticated) {
+				try {
+					await apiRefresh();
+					isAuthenticated = true;
+					this.clearTransientAuthAlert();
+				} catch (error) {
+					isAuthenticated = false;
+					this.handleRefreshFailure(error, 'restore');
+				}
 			}
+
+			this.isDevelopment = isDevelopment;
+			this.isAuthenticated = isDevelopment || isAuthenticated;
+
+			if (!isDevelopment && isAuthenticated) this.startTokenRefresh();
+			if (this.isAuthenticated) void settingsStore.initialize();
+		} finally {
+			this.isRestoringSession = false;
 		}
-
-		this.isDevelopment = isDevelopment;
-		this.isAuthenticated = isDevelopment || isAuthenticated;
-
-		if (!isDevelopment && isAuthenticated) this.startTokenRefresh();
-		if (this.isAuthenticated) void settingsStore.initialize();
 	}
 
 	async login(username: string, password: string): Promise<boolean> {
+		if (this.isLoading || this.isRestoringSession) return false;
 		this.isLoading = true;
 		this.error = null;
 
@@ -119,7 +123,10 @@ class AuthStore {
 		const isRestoreAttempt =
 			action === 'restore' || this.isRestoringSession || !this.isAuthenticated;
 		if (isTerminalAuthFailure(error)) {
-			if (isRestoreAttempt && error.code !== 'SESSION_RECOVERY_REQUIRED') return;
+			if (isRestoreAttempt && error.code !== 'SESSION_RECOVERY_REQUIRED') {
+				this.clearTransientAuthAlert();
+				return;
+			}
 			if (!this.isAuthenticated && this.authAlert?.kind === 'terminal') return;
 			this.endSession(error);
 			return;
@@ -127,7 +134,7 @@ class AuthStore {
 
 		this.authAlert = {
 			kind: 'transient',
-			source: 'refresh',
+			source: isRestoreAttempt ? 'restore' : 'refresh',
 			message: isRestoreAttempt
 				? 'Unable to restore your session right now. Please try again.'
 				: "Unable to refresh your session right now. Your session is still active; we'll retry."
@@ -151,7 +158,7 @@ class AuthStore {
 	}
 
 	private clearTransientAuthAlert(): void {
-		if (this.authAlert?.kind === 'transient' && this.authAlert.source === 'refresh') {
+		if (this.authAlert?.kind === 'transient' && this.authAlert.source !== 'logout') {
 			this.authAlert = null;
 		}
 	}

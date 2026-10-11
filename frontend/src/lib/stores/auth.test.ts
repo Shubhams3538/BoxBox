@@ -358,8 +358,11 @@ describe('auth store persistence behavior', () => {
 
 	test('startup storage failure remains recoverable and reports a transient alert', async () => {
 		let refreshCalls = 0;
+		let loginCalls = 0;
+		const retryStarted = Promise.withResolvers<void>();
+		const releaseRetry = Promise.withResolvers<void>();
 		const server = Bun.serve({
-			fetch(request) {
+			async fetch(request) {
 				const { pathname } = new URL(request.url);
 				if (pathname === '/api/v1/auth/refresh') {
 					refreshCalls += 1;
@@ -369,10 +372,15 @@ describe('auth store persistence behavior', () => {
 							{ status: 500 }
 						);
 					}
+					retryStarted.resolve();
+					await releaseRetry.promise;
 					return Response.json({
 						accessToken: 'restored-token',
 						expiresAt: '2030-01-01T00:00:00Z'
 					});
+				}
+				if (pathname === '/api/v1/auth/login') {
+					loginCalls += 1;
 				}
 				if (pathname === '/api/v1/auth/logout') {
 					return Response.json({ message: 'Logged out' });
@@ -403,7 +411,17 @@ describe('auth store persistence behavior', () => {
 			assert.equal(getAccessToken(), null);
 			assert.equal(authStore.authAlert?.kind, 'transient');
 
-			await authStore.initialize();
+			const retry = authStore.initialize();
+			try {
+				await retryStarted.promise;
+				assert.equal(authStore.isRestoringSession, true);
+				assert.equal(await authStore.login('other-user', 'other-password'), false);
+				assert.equal(loginCalls, 0);
+			} finally {
+				releaseRetry.resolve();
+				await retry;
+			}
+			assert.equal(authStore.isRestoringSession, false);
 			assert.equal(refreshCalls, 2);
 			assert.equal(authStore.isAuthenticated, true);
 			assert.equal(getAccessToken(), 'restored-token');
@@ -415,6 +433,53 @@ describe('auth store persistence behavior', () => {
 				await authStore.logout();
 			}
 			restoreSettings();
+			authStore.clearAuthAlert();
+			clearTokens();
+			Object.assign(globalThis, {
+				window: previousWindow,
+				localStorage: previousLocalStorage,
+				document: previousDocument
+			});
+			server.stop(true);
+		}
+	});
+
+	test('restore retry with an expired session clears the retry warning without an expiry alert', async () => {
+		let refreshCalls = 0;
+		const server = Bun.serve({
+			port: 0,
+			fetch(request) {
+				if (new URL(request.url).pathname === '/api/v1/auth/refresh') {
+					refreshCalls += 1;
+					return refreshCalls === 1
+						? Response.json(
+								{ error: 'Storage unavailable', code: 'INTERNAL_ERROR' },
+								{ status: 500 }
+							)
+						: Response.json({ error: 'Invalid token', code: 'TOKEN_INVALID' }, { status: 401 });
+				}
+				return new Response(null, { status: 404 });
+			}
+		});
+		const { previousWindow, previousDocument, previousLocalStorage } = installBrowser(
+			server.url.origin
+		);
+		clearTokens();
+		setAccessToken('temporary-token');
+		clearTokens();
+		authStore.clearAuthAlert();
+		authStore.isAuthenticated = false;
+		authStore.isDevelopment = false;
+
+		try {
+			await authStore.initialize();
+			assert.equal(authStore.authAlert?.kind, 'transient');
+			await authStore.initialize();
+			assert.equal(refreshCalls, 2);
+			assert.equal(authStore.isAuthenticated, false);
+			assert.equal(getAccessToken(), null);
+			assert.equal(authStore.authAlert, null);
+		} finally {
 			authStore.clearAuthAlert();
 			clearTokens();
 			Object.assign(globalThis, {

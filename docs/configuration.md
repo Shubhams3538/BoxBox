@@ -66,13 +66,15 @@ mount_points:
 | `port` | `8080` | HTTP port inside the container or process. |
 | `host` | `0.0.0.0` | Bind address. |
 | `jwt_secret` | Required | JWT signing secret of at least 32 bytes. |
-| `data_dir` | `/data` | Directory for persisted settings, shares, and the active authentication-session registry. Use one server process per directory. |
+| `data_dir` | `/data` | Dedicated directory for persisted settings, shares, and the active authentication-session registry. Relative paths resolve from the process working directory, not the YAML directory. Use one server process per directory. |
 | `rate_limit_rps` | `2` | Auth endpoint requests per second per client IP. |
 | `allowed_origins` | `[]` | WebSocket origin allow-list. Empty enforces same-origin; `*` explicitly allows all. |
 | `trusted_proxies` | `[]` | Proxy IPs/CIDRs allowed to supply client-IP headers. |
 | `allow_root_mount` | `false` | Explicit override required for a mount resolving to `/`. |
 | `max_upload_mb` | `10240` | Maximum upload size in MiB. |
 | `chunk_size_mb` | `10` | Chunk size in MiB that the browser uses for uploads. Lower it when a reverse proxy limits request body size. |
+
+An empty `data_dir` uses `/data`. Filesystem roots, including existing symlink aliases to a root, are rejected before persistence services initialize. Use a dedicated directory: the service restricts its permissions to `0700`, so do not point it at a shared home, application, or system directory.
 
 On Linux, the auth service loads or creates the version 1 `auth-sessions.json` registry under `data_dir` at startup. Its JSON shape is `{"version":1,"sessions":{"<sid>":{"username":"...","refreshHash":"<sha256>","expiresAt":"<timestamp>"}}}`. It stores no raw JWTs. Startup stops if the file is corrupt, unreadable, non-regular, unsupported, or from a future version. Development mode also needs a writable `data_dir` because `--dev` does not bypass registry initialization.
 
