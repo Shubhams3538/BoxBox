@@ -2,14 +2,37 @@
 
 Use this workflow to keep stable releases and nightly builds in separate GHCR packages while still getting automatic nightly and branch images for testing.
 
-## Unreleased
+## v0.3.1 Security Release
+
+`v0.3.1` fixes session invalidation and recovery for GHSA-jj9r-xc63-6c4p. All users must sign in again after upgrading.
 
 ### Fixes
 
-- Authentication uses the version 1 active-session registry, `auth-sessions.json`, under `data_dir`. It stores session IDs, usernames, SHA-256 hashes of current refresh tokens, and deadlines, never raw JWTs. Access and refresh tokens both require an active session. Logout removes the whole session and invalidates all of its access tokens; separate logins remain active.
-- Login, refresh, and logout persist registry changes before reporting success. Rename is the publication point, and success requires syncing and closing the temporary file, renaming it, and syncing the parent directory. A failure before rename returns `500` without a token pair or `Set-Cookie`; refresh and logout preserve the existing cookie for retry, while login does not clear an unrelated cookie. A failure after rename returns `401 SESSION_RECOVERY_REQUIRED` without a token pair. Refresh and logout clear the cookie; login does not clear an unrelated cookie.
-- Keep `data_dir` on persistent storage and use one server process per directory. A missing registry file or a valid version 1 snapshot with an empty `sessions` map at startup rejects old access and refresh tokens; users can sign in again, and secret rotation is not required solely because the registry was lost. A zero-byte or malformed file fails startup. A registry deleted while the server is running does not clear memory or immediately revalidate disk state.
-- Corrupt, unreadable, non-regular, unsupported, or future-version registries stop startup. Restore a valid backup rather than resetting the file. Restoring an older valid backup can revive its sessions, access tokens, and current refresh tokens, so rotate `BOXBOX_JWT_SECRET` after rollback. `auth-revocations.json` is ignored and not deleted; the old denylist cannot be converted into active sessions. Legacy tokens without a session ID are rejected without automatic enrollment. Downgrading to a validator that ignores session IDs and the registry may accept tokens, so rotate the secret when downgrading.
+- Authentication uses the version 1 active-session registry, `auth-sessions.json`, under `data_dir`. The file stores session IDs, usernames, SHA-256 hashes of current refresh tokens, and deadlines, never raw JWTs. Access and refresh tokens both require an active session. Logout removes the whole session and invalidates its access tokens; separate logins remain active.
+- Login, refresh, and logout persist registry changes before reporting success. Rename publishes each change after the temporary file is synced and closed; success also requires syncing the parent directory. A failure before rename returns `500` without a token pair or `Set-Cookie`. Refresh and logout preserve the existing cookie for retry, while login does not clear an unrelated cookie. A failure after rename returns `401 SESSION_RECOVERY_REQUIRED` without a token pair. Refresh and logout clear the cookie; login does not clear an unrelated cookie.
+
+### Upgrade notes
+
+- Keep `data_dir` on persistent storage and run one server process per data directory. The active-session registry, `auth-sessions.json`, lives under `data_dir`.
+- On startup, a missing registry or a valid version 1 snapshot with an empty `sessions` map rejects old access and refresh tokens. Users can sign in again; registry loss alone does not require secret rotation.
+- A zero-byte, malformed, unreadable, non-regular, unsupported, or future-version registry stops startup. Restore a valid backup rather than deleting or resetting the file.
+- Restoring an older valid backup can revive its sessions, access tokens, and current refresh tokens. Rotate `BOXBOX_JWT_SECRET` after rollback. A registry deleted while the server runs does not clear its in-memory sessions or trigger a disk reload.
+- `auth-revocations.json` is ignored and is not deleted. The old denylist cannot be converted into active sessions. Legacy tokens without a session ID are rejected.
+- A downgrade to a validator that ignores session IDs and the registry may accept tokens. Rotate `BOXBOX_JWT_SECRET` when downgrading.
+
+After the `v0.3.1` image is published, update an existing Compose deployment:
+
+```bash
+BOXBOX_IMAGE=ghcr.io/jr4dh3y/boxbox:v0.3.1 docker compose pull
+BOXBOX_IMAGE=ghcr.io/jr4dh3y/boxbox:v0.3.1 docker compose up -d
+```
+
+The stable Docker workflow runs from the `v0.3.1` tag and publishes:
+
+```text
+ghcr.io/jr4dh3y/boxbox:v0.3.1
+ghcr.io/jr4dh3y/boxbox:latest
+```
 
 ## v0.3.0 Release Notes
 

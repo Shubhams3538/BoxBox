@@ -34,6 +34,10 @@ BoxBox is a self-hosted file manager for homelab and NAS-style servers. It provi
   <sub>Watch BoxBox in 40 seconds. Music: <a href="https://www.youtube.com/watch?v=LL9VJAljSQs">“the kill 2” by Lex Amarni &amp; 2muchmotion</a>.</sub>
 </p>
 
+## Security update
+
+BoxBox `v0.3.1` fixes GHSA-jj9r-xc63-6c4p. Upgrade to `v0.3.1` and sign in again after the update. See the [security release notes](docs/release.md#v031-security-release) for registry storage and rollback guidance.
+
 ## Quick Start
 
 The preferred deployment path is Docker Compose using the published GitHub Container Registry image. No source checkout is required.
