@@ -310,8 +310,7 @@
 	}
 
 	async function handleLogout() {
-		await authStore.logout();
-		goto(resolve('/login'));
+		if (await authStore.logout()) goto(resolve('/login'));
 	}
 
 	function goBack() {

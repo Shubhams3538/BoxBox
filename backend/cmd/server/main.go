@@ -138,10 +138,14 @@ func initializeServer(cfg *model.ServerConfig, devMode bool) (*http.Server, *web
 	hub := websocket.NewHub()
 
 	// Create services
-	authService := service.NewAuthService(service.AuthServiceConfig{
+	authService, err := service.NewAuthService(fs, service.AuthServiceConfig{
+		DataDir:   cfg.DataDir,
 		JWTSecret: cfg.JWTSecret,
 		Users:     cfg.Users,
 	})
+	if err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("initialize auth service: %w", err)
+	}
 
 	fileService := service.NewFileService(fs, service.FileServiceConfig{
 		MountPoints: mountPoints,

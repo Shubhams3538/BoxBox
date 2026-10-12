@@ -2,7 +2,14 @@
  * Auth API module for authentication operations
  */
 
-import { apiRequest, setAccessToken, clearTokens, isAuthenticated as checkAuth } from './client';
+import {
+	apiRequest,
+	setAccessToken,
+	refreshSession,
+	logoutSession,
+	isAuthenticated as checkAuth,
+	type AccessTokenResponse
+} from './client';
 
 /**
  * Login request
@@ -15,17 +22,7 @@ export interface LoginRequest {
 /**
  * Login response
  */
-export interface LoginResponse {
-	accessToken: string;
-	expiresAt: string;
-}
-
-/**
- * Success message response
- */
-interface MessageResponse {
-	message: string;
-}
+export type LoginResponse = AccessTokenResponse;
 
 /**
  * Login with username and password
@@ -50,32 +47,16 @@ export async function login(username: string, password: string): Promise<LoginRe
  * Refresh access token using refresh token
  * POST /api/v1/auth/refresh
  */
-export async function refresh(): Promise<LoginResponse> {
-	const response = await apiRequest<LoginResponse>('/auth/refresh', {
-		method: 'POST',
-		skipAuth: true
-	});
-
-	setAccessToken(response.accessToken);
-
-	return response;
+export function refresh(): Promise<LoginResponse> {
+	return refreshSession();
 }
 
 /**
  * Logout and invalidate refresh token
  * POST /api/v1/auth/logout
  */
-export async function logout(): Promise<void> {
-	try {
-		await apiRequest<MessageResponse>('/auth/logout', {
-			method: 'POST'
-		});
-	} catch {
-		// Ignore errors during logout - we'll clear the in-memory token anyway.
-	}
-
-	// Always clear tokens locally
-	clearTokens();
+export function logout(): Promise<void> {
+	return logoutSession();
 }
 
 /**

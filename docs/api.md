@@ -38,6 +38,8 @@ Response:
 
 The refresh token is not in the body. The server sets it as the `boxbox_refresh` cookie (`HttpOnly`, `SameSite=Strict`, path `/api/v1/auth`, `Secure` over HTTPS). Send requests with cookies enabled so refresh and logout can use it.
 
+Login creates a new session and saves it before returning the token pair. If the save fails before publication, login returns `500` without a token pair or `Set-Cookie` header. The browser's existing refresh cookie remains unchanged.
+
 ### Use an Access Token
 
 ```http
@@ -50,16 +52,23 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 POST /api/v1/auth/refresh
 ```
 
-The request has no body. The server reads the `boxbox_refresh` cookie and returns a new `accessToken` and `expiresAt`.
+The request has no body. The server reads the `boxbox_refresh` cookie, checks that its session is active and that the token is the session's current refresh token, then returns a new `accessToken` and `expiresAt` and rotates the refresh cookie. The access token keeps working until its own expiry while the session remains active.
 
 ### Logout
 
 ```http
 POST /api/v1/auth/logout
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 ```
 
-The request has no body. Logout needs a valid refresh cookie, otherwise it returns `401` with `TOKEN_INVALID`. The server revokes that refresh token and clears the cookie. It also revokes the access token when the request carries a valid one for the same user. Without one, the access token stays valid until it expires.
+The request has no body. Logout needs a valid current refresh cookie. It does not need an access-token header. Logout removes the entire session, so all access tokens issued by that session stop working, including tokens from earlier refresh rotations. Other logins for the same account remain active. A missing or invalid refresh cookie returns `401 TOKEN_INVALID` and clears the cookie.
+
+Login, refresh, and logout save session state before reporting success. Publication occurs at the file rename. Success requires syncing and closing the file, renaming it, and syncing the parent directory. Before rename, a failed write returns `500 INTERNAL_ERROR` without publishing a token pair or a `Set-Cookie` header. Refresh and logout preserve the existing cookie so the client can retry. Login does not clear an unrelated cookie.
+
+If a durability step fails after rename, the server keeps the installed in-memory state and returns `401 SESSION_RECOVERY_REQUIRED` without a token pair. Refresh and logout clear the cookie. Login sends no new cookie and does not clear an unrelated existing cookie. Sign in again after this error. Logout did not report success.
+
+Every access and refresh token must name an active session. If the registry file is missing at startup, or a valid version 1 registry has an empty `sessions` map, the server starts with no active sessions and previously issued tokens receive `401`. A zero-byte or malformed file fails startup. Deleting the registry while the server is running does not clear its in-memory sessions; an access token can still receive `200`, and a later successful write can persist the registry again.
+
+Tokens without a session ID, including legacy tokens, are rejected. The server does not enroll them automatically.
 
 ## Files
 
@@ -536,6 +545,8 @@ Server messages:
 
 Terminal jobs use `job_complete`. Errors use `error`; ping replies use `pong`.
 
+WebSocket authentication is checked at handshake. Logout does not close a connection that was already established.
+
 ## Errors
 
 Errors use:
@@ -548,4 +559,6 @@ Errors use:
 }
 ```
 
-Common codes include `VALIDATION_ERROR`, `UNAUTHORIZED`, `TOKEN_INVALID`, `ACCESS_DENIED`, `READ_ONLY`, `INVALID_PATH`, `NOT_FOUND`, `CONFLICT`, `JOB_NOT_FOUND`, `CHECKSUM_MISMATCH`, and `INTERNAL_ERROR`.
+Common codes include `VALIDATION_ERROR`, `UNAUTHORIZED`, `TOKEN_INVALID`, `SESSION_RECOVERY_REQUIRED`, `ACCESS_DENIED`, `READ_ONLY`, `INVALID_PATH`, `NOT_FOUND`, `CONFLICT`, `JOB_NOT_FOUND`, `CHECKSUM_MISMATCH`, and `INTERNAL_ERROR`.
+
+Auth storage errors before rename return `500` with `INTERNAL_ERROR` and no token pair or `Set-Cookie` header. Refresh and logout preserve the existing cookie for retry. Login does not clear an unrelated cookie. `SESSION_RECOVERY_REQUIRED` returns `401` if a durability step fails after rename. It has no token pair; refresh and logout clear the cookie, while login does not clear an unrelated cookie. Logout does not count as successful in this case.

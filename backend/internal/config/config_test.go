@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -197,6 +198,97 @@ mount_points:
 	}
 	if !hasWarning(result.Warnings, filepath.Join(legacyConfigDir, "config.yaml")) {
 		t.Fatalf("Warnings = %#v, want warning for legacy config path", result.Warnings)
+	}
+}
+
+func TestLoadResolvesDataDirectoryFromWorkingDirectory(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		fileValue string
+		envValue  string
+		want      string
+	}{
+		{name: "relative file", fileValue: "./state", want: "state"},
+		{name: "relative environment overrides file", fileValue: "./file-state", envValue: "./env-state", want: "env-state"},
+		{name: "absolute file", fileValue: "/data", want: "/data"},
+		{name: "empty uses default", fileValue: "", want: DefaultDataDir},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearConfigEnv(t)
+			workingDir := t.TempDir()
+			t.Chdir(workingDir)
+			configPath := writeMinimalConfig(t)
+			file, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := file.WriteString("data_dir: " + strconv.Quote(tc.fileValue) + "\n"); err != nil {
+				file.Close()
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("BOXBOX_JWT_SECRET", "unit-test-secret-at-least-thirty-two-bytes")
+			t.Setenv("BOXBOX_USERS_admin", testHashA)
+			if tc.envValue != "" {
+				t.Setenv("BOXBOX_DATA_DIR", tc.envValue)
+			}
+
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := tc.want
+			if !filepath.IsAbs(want) {
+				want = filepath.Join(workingDir, want)
+			}
+			if cfg.DataDir != want {
+				t.Fatalf("DataDir = %q, want %q", cfg.DataDir, want)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsFilesystemRootDataDirectory(t *testing.T) {
+	t.Chdir(t.TempDir())
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.VolumeName(workingDir) + string(filepath.Separator)
+	relativeRoot, err := filepath.Rel(workingDir, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		value string
+		link  bool
+	}{
+		{name: "absolute root", value: root},
+		{name: "relative root", value: relativeRoot},
+		{name: "symlink to root", link: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearConfigEnv(t)
+			value := tc.value
+			if tc.link {
+				value = filepath.Join(t.TempDir(), "root-alias")
+				if err := os.Symlink(root, value); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			}
+			t.Setenv("BOXBOX_JWT_SECRET", "unit-test-secret-at-least-thirty-two-bytes")
+			t.Setenv("BOXBOX_USERS_admin", testHashA)
+			t.Setenv("BOXBOX_DATA_DIR", value)
+
+			cfg, err := Load(writeMinimalConfig(t))
+			if err == nil || cfg != nil {
+				t.Fatal("filesystem root was accepted as a private data directory")
+			}
+		})
 	}
 }
 

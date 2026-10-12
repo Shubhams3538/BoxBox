@@ -2,6 +2,15 @@
 
 Use this workflow to keep stable releases and nightly builds in separate GHCR packages while still getting automatic nightly and branch images for testing.
 
+## Unreleased
+
+### Fixes
+
+- Authentication uses the version 1 active-session registry, `auth-sessions.json`, under `data_dir`. It stores session IDs, usernames, SHA-256 hashes of current refresh tokens, and deadlines, never raw JWTs. Access and refresh tokens both require an active session. Logout removes the whole session and invalidates all of its access tokens; separate logins remain active.
+- Login, refresh, and logout persist registry changes before reporting success. Rename is the publication point, and success requires syncing and closing the temporary file, renaming it, and syncing the parent directory. A failure before rename returns `500` without a token pair or `Set-Cookie`; refresh and logout preserve the existing cookie for retry, while login does not clear an unrelated cookie. A failure after rename returns `401 SESSION_RECOVERY_REQUIRED` without a token pair. Refresh and logout clear the cookie; login does not clear an unrelated cookie.
+- Keep `data_dir` on persistent storage and use one server process per directory. A missing registry file or a valid version 1 snapshot with an empty `sessions` map at startup rejects old access and refresh tokens; users can sign in again, and secret rotation is not required solely because the registry was lost. A zero-byte or malformed file fails startup. A registry deleted while the server is running does not clear memory or immediately revalidate disk state.
+- Corrupt, unreadable, non-regular, unsupported, or future-version registries stop startup. Restore a valid backup rather than resetting the file. Restoring an older valid backup can revive its sessions, access tokens, and current refresh tokens, so rotate `BOXBOX_JWT_SECRET` after rollback. `auth-revocations.json` is ignored and not deleted; the old denylist cannot be converted into active sessions. Legacy tokens without a session ID are rejected without automatic enrollment. Downgrading to a validator that ignores session IDs and the registry may accept tokens, so rotate the secret when downgrading.
+
 ## v0.3.0 Release Notes
 
 `v0.3.0` adds file and folder sharing, folder uploads, separate Drives and Places in the sidebar, and a redesigned share page. It also moves the default container port from `80` to `8080`.
