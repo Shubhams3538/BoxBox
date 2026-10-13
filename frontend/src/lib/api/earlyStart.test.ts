@@ -63,7 +63,7 @@ const realWindow = globalThis.window;
 const realLocalStorage = globalThis.localStorage;
 beforeEach(() =>
 	Object.assign(globalThis, {
-		window: { location: { origin } },
+		window: Object.assign(new EventTarget(), { location: { origin } }),
 		localStorage: { removeItem: () => {} }
 	})
 );
