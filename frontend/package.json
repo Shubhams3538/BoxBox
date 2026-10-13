@@ -11,8 +11,12 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --tsgo",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --tsgo --watch",
 		"test": "bun test --conditions browser",
+		"perf:budget": "bun scripts/bundle-budget.ts",
 		"format": "prettier --write .",
-		"lint": "prettier --check . && eslint ."
+		"lint": "prettier --check . && eslint .",
+		"perf:browser": "bun scripts/perf/browser.ts",
+		"perf:backend": "bun scripts/perf/backend.ts",
+		"perf:check": "bunx tsc --project scripts/perf/tsconfig.json"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.1.1",
@@ -30,6 +34,7 @@
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.23.0",
 		"globals": "^17.12.0",
+		"playwright": "1.64.0",
 		"prettier": "^3.9.9",
 		"prettier-plugin-svelte": "^4.1.1",
 		"prettier-plugin-tailwindcss": "^0.8.1",
