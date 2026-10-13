@@ -48,9 +48,8 @@ func TestListDirectoryAllocationCeiling(t *testing.T) {
 	const entries = 1000
 	svc := setupBenchDirectory(t, entries)
 	ctx := context.Background()
-	ceilings := map[string]float64{"name": 2300, "type": 2300, "size": 2300, "modTime": 2300}
-
-	for sortBy, ceiling := range ceilings {
+	for _, sortBy := range []string{"name", "type", "size", "modTime"} {
+		ceiling := allocationCeiling(t, "list/"+sortBy)
 		opts := model.ListOptions{Page: 1, PageSize: 50, SortBy: sortBy, SortDir: "asc"}
 		allocs := testing.AllocsPerRun(5, func() {
 			if _, err := svc.List(ctx, "media/bench", opts); err != nil {

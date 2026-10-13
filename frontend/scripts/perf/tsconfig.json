@@ -1,0 +1,15 @@
+{
+	"compilerOptions": {
+		"target": "es2023",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"noEmit": true,
+		"types": ["bun"],
+		"lib": ["es2023", "dom"],
+		"skipLibCheck": true,
+		"resolveJsonModule": true,
+		"esModuleInterop": true
+	},
+	"include": ["./*.ts"]
+}

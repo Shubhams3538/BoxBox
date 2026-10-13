@@ -48,7 +48,7 @@ func BenchmarkSearchWalk(b *testing.B) {
 func TestSearchAllocationCeiling(t *testing.T) {
 	svc := setupBenchTree(t, 10, 100)
 	ctx := context.Background()
-	const ceiling = 4300
+	ceiling := allocationCeiling(t, "search")
 	allocs := testing.AllocsPerRun(5, func() {
 		if _, err := svc.Search(ctx, "media", "zzz"); err != nil {
 			t.Fatal(err)
@@ -56,6 +56,6 @@ func TestSearchAllocationCeiling(t *testing.T) {
 	})
 	t.Logf("allocs=%.0f", allocs)
 	if allocs > ceiling {
-		t.Errorf("%.0f allocs per search exceeds ceiling %d", allocs, ceiling)
+		t.Errorf("%.0f allocs per search exceeds ceiling %.0f", allocs, ceiling)
 	}
 }
