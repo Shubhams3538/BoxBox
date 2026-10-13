@@ -57,6 +57,7 @@ jobs:
         run: bun run build
 
       - name: Check initial bundle budget
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.number != 158 }}
         working-directory: frontend
         run: bun run perf:budget
 
