@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,7 +19,9 @@ func newCompressionTestServer(t *testing.T) http.Handler {
 	t.Helper()
 	root := t.TempDir()
 	for i := 0; i < 60; i++ {
-		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("holiday-photo-%03d.jpg", i)), []byte("x"), 0o644); err != nil {
+		// Large, repetitive content catches accidental compression of download routes.
+		content := bytes.Repeat([]byte("holiday photo fixture\n"), 256)
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("holiday-photo-%03d.jpg", i)), content, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -78,12 +81,43 @@ func TestDirectoryListingIsGzippedWhenAccepted(t *testing.T) {
 
 func TestFileDownloadsAreNotRecompressed(t *testing.T) {
 	handler := newCompressionTestServer(t)
-	rec := get(handler, "/api/v1/stream/files/holiday-photo-000.jpg", "gzip")
-	if rec.Code != http.StatusOK && rec.Code != http.StatusPartialContent {
-		t.Fatalf("stream status %d: %s", rec.Code, rec.Body.String())
-	}
-	if encoding := rec.Header().Get("Content-Encoding"); encoding != "" {
-		t.Fatalf("file stream must not be content-encoded, got %q", encoding)
+	content := bytes.Repeat([]byte("holiday photo fixture\n"), 256)
+	for _, tc := range []struct {
+		name         string
+		rangeHeader  string
+		status       int
+		body         []byte
+		contentRange string
+	}{
+		{name: "full", status: http.StatusOK, body: content},
+		{name: "range", rangeHeader: "bytes=1-20", status: http.StatusPartialContent,
+			body: content[1:21], contentRange: fmt.Sprintf("bytes 1-20/%d", len(content))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/download/files/holiday-photo-000.jpg", nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			if tc.rangeHeader != "" {
+				req.Header.Set("Range", tc.rangeHeader)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("download status %d, want %d", rec.Code, tc.status)
+			}
+			if encoding := rec.Header().Get("Content-Encoding"); encoding != "" {
+				t.Fatalf("file download must not be content-encoded, got %q", encoding)
+			}
+			if !bytes.Equal(rec.Body.Bytes(), tc.body) {
+				t.Fatalf("download body differs from fixture: got %d bytes, want %d", rec.Body.Len(), len(tc.body))
+			}
+			disposition, params, err := mime.ParseMediaType(rec.Header().Get("Content-Disposition"))
+			if err != nil || disposition != "attachment" || params["filename"] != "holiday-photo-000.jpg" {
+				t.Fatalf("unexpected download disposition: %q (%v)", rec.Header().Get("Content-Disposition"), err)
+			}
+			if got := rec.Header().Get("Content-Range"); got != tc.contentRange {
+				t.Fatalf("Content-Range = %q, want %q", got, tc.contentRange)
+			}
+		})
 	}
 }
 
