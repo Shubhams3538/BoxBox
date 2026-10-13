@@ -39,6 +39,7 @@
 	// Public routes that don't require authentication
 	// '/s/' rather than '/s' so the prefix cannot also match '/settings'
 	const publicRoutes = ['/login', '/s/'];
+	const isPublicRoute = $derived(publicRoutes.some((route) => page.url.pathname.startsWith(route)));
 	// Full-bleed pages render without the standard page chrome
 	const isFullBleedPage = $derived(
 		page.url.pathname.startsWith('/browse') ||
@@ -89,7 +90,6 @@
 		if (!initialized) return;
 
 		const currentPath = page.url.pathname;
-		const isPublicRoute = publicRoutes.some((route) => currentPath.startsWith(route));
 
 		if (!authStore.isAuthenticated && !isPublicRoute) {
 			goto(resolve('/login'));
@@ -189,7 +189,7 @@
 
 	<div class="app-content">
 		<QueryClientProvider client={queryClient}>
-			{#if !initialized}
+			{#if !initialized || (!authStore.isAuthenticated && !isPublicRoute)}
 				<div class="flex min-h-screen items-center justify-center bg-surface-primary">
 					<Spinner size="lg" />
 				</div>
