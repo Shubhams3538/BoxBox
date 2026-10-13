@@ -15,24 +15,36 @@ class JobsStore {
 	onFinished?: () => void;
 	isLoading = $state(false);
 	error = $state<string | null>(null);
+	/** Invalidates overlapping loads and responses from a previous session. */
+	private loadVersion = 0;
 
 	/** Pending and running jobs, newest first */
 	active = $derived(Array.from(this.jobs.values()).filter(isJobActive).sort(newestFirst));
 
 	async loadJobs(): Promise<void> {
+		const version = ++this.loadVersion;
+		const atRequest = new Map(this.jobs);
 		this.isLoading = true;
 		this.error = null;
 		try {
-			const wasActive = this.active;
 			const response = await listJobs();
+			if (version !== this.loadVersion) return;
+
+			// Live updates and newly created jobs are newer than the HTTP snapshot.
+			// Both writers replace Job objects, so identity tells us which changed.
+			const liveUpdates = Array.from(this.jobs).filter(([id, job]) => job !== atRequest.get(id));
+			const wasActive = this.active;
 			this.jobs.clear();
 			for (const job of response.jobs) this.jobs.set(job.id, job);
-			// A job can end while the socket is down, and its message is gone for good.
+			for (const [id, job] of liveUpdates) this.jobs.set(id, job);
+			// Only notify for transitions this reload discovers, not ones the socket already reported.
 			if (wasActive.some((job) => !isJobActive(this.jobs.get(job.id) ?? job))) this.onFinished?.();
 		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to load jobs';
+			if (version === this.loadVersion) {
+				this.error = err instanceof Error ? err.message : 'Failed to load jobs';
+			}
 		} finally {
-			this.isLoading = false;
+			if (version === this.loadVersion) this.isLoading = false;
 		}
 	}
 
@@ -58,6 +70,7 @@ class JobsStore {
 	}
 
 	reset(): void {
+		this.loadVersion++;
 		this.jobs.clear();
 		this.isLoading = false;
 		this.error = null;

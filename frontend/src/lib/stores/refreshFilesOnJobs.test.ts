@@ -32,6 +32,22 @@ function serveJobs(...jobs: Job[]) {
 	});
 }
 
+/** Hold a captured HTTP snapshot until after live updates have arrived. */
+function holdJobs(...jobs: Job[]) {
+	let release!: (response: Response) => void;
+	const response = new Promise<Response>((resolve) => (release = resolve));
+	let started!: () => void;
+	const requested = new Promise<void>((resolve) => (started = resolve));
+	serveJobs();
+	Object.assign(globalThis, {
+		fetch: async () => {
+			started();
+			return response;
+		}
+	});
+	return { requested, respond: () => release(Response.json({ jobs })) };
+}
+
 beforeEach(() => serveJobs());
 
 afterEach(() => {
@@ -73,6 +89,84 @@ describe('jobsStore.onFinished', () => {
 });
 
 describe('jobsStore.loadJobs', () => {
+	for (const state of ['completed', 'failed', 'cancelled'] as const) {
+		test(`preserves a live ${state} update over an older running snapshot`, async () => {
+			let calls = 0;
+			jobsStore.onFinished = () => calls++;
+			jobsStore.upsertJob(job('running'));
+			const held = holdJobs(job('running'));
+			const loading = jobsStore.loadJobs();
+			await held.requested;
+
+			jobsStore.updateFromWebSocket({ jobId: 'job-1', state, progress: 100 });
+			const completed = jobsStore.jobs.get('job-1');
+			held.respond();
+			await loading;
+
+			assert.equal(jobsStore.jobs.get('job-1'), completed);
+			assert.equal(jobsStore.active.length, 0);
+			assert.equal(calls, 1, 'completion must not be reported twice');
+			assert.equal(jobsStore.isLoading, false);
+		});
+	}
+
+	test('preserves live progress and jobs created while the list request waits', async () => {
+		jobsStore.upsertJob(job('running'));
+		const held = holdJobs(job('running'), { ...job('completed'), id: 'server-job' });
+		const loading = jobsStore.loadJobs();
+		await held.requested;
+		jobsStore.updateFromWebSocket({ jobId: 'job-1', state: 'running', progress: 75 });
+		jobsStore.upsertJob({ ...job('pending'), id: 'new-job' });
+		held.respond();
+		await loading;
+
+		assert.equal(jobsStore.jobs.get('job-1')?.progress, 75);
+		assert.equal(jobsStore.jobs.get('new-job')?.state, 'pending');
+		assert.equal(jobsStore.jobs.get('server-job')?.state, 'completed');
+	});
+
+	test('preserves an updated job even when the HTTP snapshot omits it', async () => {
+		jobsStore.upsertJob(job('running'));
+		const held = holdJobs();
+		const loading = jobsStore.loadJobs();
+		await held.requested;
+		jobsStore.updateFromWebSocket({ jobId: 'job-1', state: 'completed', progress: 100 });
+		held.respond();
+		await loading;
+
+		assert.equal(jobsStore.jobs.get('job-1')?.state, 'completed');
+	});
+
+	test('a superseded request cannot overwrite the newer list', async () => {
+		const held = holdJobs(job('running'));
+		const loading = jobsStore.loadJobs();
+		await held.requested;
+		serveJobs(job('completed'));
+		await jobsStore.loadJobs();
+		held.respond();
+		await loading;
+
+		assert.equal(jobsStore.jobs.get('job-1')?.state, 'completed');
+	});
+
+	test('reset invalidates a pending request without disturbing a new load', async () => {
+		const old = holdJobs(job('running'));
+		const oldLoading = jobsStore.loadJobs();
+		await old.requested;
+		jobsStore.reset();
+		const next = holdJobs({ ...job('pending'), id: 'new-session-job' });
+		const nextLoading = jobsStore.loadJobs();
+		await next.requested;
+		old.respond();
+		await oldLoading;
+		assert.equal(jobsStore.jobs.size, 0);
+		assert.equal(jobsStore.isLoading, true, 'old request must not finish the new load');
+		next.respond();
+		await nextLoading;
+		assert.deepEqual([...jobsStore.jobs.keys()], ['new-session-job']);
+		assert.equal(jobsStore.isLoading, false);
+	});
+
 	test('fires when a job we saw running has ended on the server, as after a reconnect', async () => {
 		let calls = 0;
 		jobsStore.onFinished = () => calls++;

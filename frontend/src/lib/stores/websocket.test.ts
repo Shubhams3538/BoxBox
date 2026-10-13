@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { CONFIG } from '$lib/config';
+import { jobsStore } from './jobs.svelte';
 import { connectFromEffect, flushSync, websocketStore } from './websocket.test.svelte';
 
 class FakeSocket {
@@ -129,6 +130,7 @@ describe('websocket reconnect job refresh', () => {
 	let jobRequests: string[] = [];
 
 	beforeEach(() => {
+		jobsStore.reset();
 		jobRequests = [];
 		Object.assign(globalThis, {
 			// The API client builds its URLs from the page origin.
@@ -141,6 +143,8 @@ describe('websocket reconnect job refresh', () => {
 	});
 
 	afterEach(() => {
+		jobsStore.onFinished = undefined;
+		jobsStore.reset();
 		Object.assign(globalThis, { fetch: realFetch });
 	});
 
@@ -157,6 +161,50 @@ describe('websocket reconnect job refresh', () => {
 		await settle();
 		assert.equal(jobRequests.length, 1);
 		assert.match(jobRequests[0], /\/jobs$/);
+	});
+
+	test('a reconnect snapshot cannot undo a later socket completion', async () => {
+		const running = {
+			id: 'reconnect-job',
+			type: 'copy' as const,
+			state: 'running' as const,
+			progress: 25,
+			sourcePath: 'media/source',
+			createdAt: '2026-01-01T00:00:00Z'
+		};
+		jobsStore.upsertJob(running);
+		let finished = 0;
+		jobsStore.onFinished = () => finished++;
+		let release!: (response: Response) => void;
+		const response = new Promise<Response>((resolve) => (release = resolve));
+		let started!: () => void;
+		const requested = new Promise<void>((resolve) => (started = resolve));
+		Object.assign(globalThis, {
+			fetch: async () => {
+				started();
+				return response;
+			}
+		});
+
+		websocketStore.connect(true);
+		FakeSocket.instances[0].onopen?.();
+		const reconnected = dropAndRetry();
+		reconnected.onopen?.();
+		await requested;
+		reconnected.onmessage?.({
+			data: JSON.stringify({
+				type: 'job_complete',
+				payload: { jobId: running.id, state: 'completed', progress: 100 }
+			})
+		});
+		release(Response.json({ jobs: [running] }));
+		await settle();
+
+		assert.equal(jobsStore.jobs.get(running.id)?.state, 'completed');
+		assert.equal(jobsStore.jobs.get(running.id)?.progress, 100);
+		assert.equal(jobsStore.active.length, 0);
+		assert.equal(jobsStore.isLoading, false);
+		assert.equal(finished, 1);
 	});
 
 	test('does not reload jobs again when a healthy connection simply stays open', async () => {
