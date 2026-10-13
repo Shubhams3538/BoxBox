@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { createEarlyStart } from './earlyStart';
 import { restoreSession } from './auth';
+import { ApiRequestError } from './client';
 import { directoryUrl, type FileList } from './files';
 import { tokenStorage } from '$lib/utils/storage';
 
@@ -322,7 +323,30 @@ describe('restoreSession', () => {
 
 	test('a 401 from the shell is final: a logged-out visit makes one refresh request', async () => {
 		const { win, calls } = runShell({ refresh: () => new Response('no', { status: 401 }) });
-		await assert.rejects(restoreSession(createEarlyStart(() => win)));
+		await assert.rejects(
+			restoreSession(createEarlyStart(() => win)),
+			(error: unknown) =>
+				error instanceof ApiRequestError && error.status === 401 && error.code === 'UNAUTHORIZED'
+		);
+		assert.equal(refreshCalls(calls).length, 1);
+		assert.deepEqual(requests, []);
+	});
+
+	test('preserves the security release recovery-required code from an early 401', async () => {
+		const { win, calls } = runShell({
+			refresh: () =>
+				Response.json(
+					{ error: 'Sign in required', code: 'SESSION_RECOVERY_REQUIRED' },
+					{ status: 401 }
+				)
+		});
+		await assert.rejects(
+			restoreSession(createEarlyStart(() => win)),
+			(error: unknown) =>
+				error instanceof ApiRequestError &&
+				error.status === 401 &&
+				error.code === 'SESSION_RECOVERY_REQUIRED'
+		);
 		assert.equal(refreshCalls(calls).length, 1);
 		assert.deepEqual(requests, []);
 	});

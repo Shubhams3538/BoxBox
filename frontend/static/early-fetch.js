@@ -48,7 +48,14 @@
 		? null
 		: fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'same-origin' })
 				.then((response) =>
-					response.ok ? response.json() : response.status === 401 ? { rejected: true } : null
+					response.ok
+						? response.json()
+						: response.status === 401
+							? response.json().then(
+									(body) => ({ rejected: true, error: body?.error, code: body?.code }),
+									() => ({ rejected: true })
+								)
+							: null
 				)
 				.catch(() => null);
 

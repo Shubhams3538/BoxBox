@@ -61,7 +61,6 @@ export async function restoreSession(
 	source: EarlyStartSource = earlyStart
 ): Promise<LoginResponse> {
 	const early = await source.takeSession();
-	if (early === 'rejected') throw new Error('No valid session');
 	if (!early) return refresh();
 	setAccessToken(early.accessToken);
 	return early;

@@ -1,5 +1,5 @@
 import { CONFIG } from '$lib/config';
-import { parseResponse, type AccessTokenResponse } from './client';
+import { ApiRequestError, parseResponse, type AccessTokenResponse } from './client';
 import type { FileList } from './files';
 
 /** What `static/early-fetch.js` starts while the app's JavaScript is still downloading. */
@@ -19,10 +19,10 @@ declare global {
 	}
 }
 
-/** What `takeSession` found: the tokens, a definite "not signed in", or nothing usable. */
-export type EarlySession = AccessTokenResponse | 'rejected' | null;
+/** Tokens or nothing usable; a definite rejection throws the same typed 401 as the API client. */
+export type EarlySession = AccessTokenResponse | null;
 
-function isRejected(value: unknown): boolean {
+function isRejected(value: unknown): value is { rejected: true; error?: unknown; code?: unknown } {
 	return (
 		typeof value === 'object' && value !== null && 'rejected' in value && value.rejected === true
 	);
@@ -64,7 +64,13 @@ export function createEarlyStart(win: () => Pick<Window, 'boxboxEarly'>) {
 			const pending = session;
 			session = null;
 			const tokens = await pending;
-			if (isRejected(tokens)) return 'rejected';
+			if (isRejected(tokens)) {
+				throw new ApiRequestError(
+					typeof tokens.error === 'string' ? tokens.error : 'No valid session',
+					401,
+					typeof tokens.code === 'string' ? tokens.code : 'UNAUTHORIZED'
+				);
+			}
 			return isAccessTokenResponse(tokens) ? tokens : null;
 		},
 
