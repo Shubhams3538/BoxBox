@@ -8,7 +8,10 @@
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import { CONFIG } from '$lib/config';
 	import { Spinner, Button } from '$lib/components/ui';
+	import { AlertTriangle, X } from 'lucide-svelte';
+	import { AuthRefreshEvent } from '$lib/api/client';
 	import { jobsStore } from '$lib/stores/jobs.svelte';
+	import { refreshFilesWhenJobsFinish } from '$lib/stores/refreshFilesOnJobs';
 	import { websocketStore } from '$lib/stores/websocket.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { shareWallpaperStore } from '$lib/stores/shareWallpaper.svelte';
@@ -36,6 +39,7 @@
 	// Public routes that don't require authentication
 	// '/s/' rather than '/s' so the prefix cannot also match '/settings'
 	const publicRoutes = ['/login', '/s/'];
+	const isPublicRoute = $derived(publicRoutes.some((route) => page.url.pathname.startsWith(route)));
 	// Full-bleed pages render without the standard page chrome
 	const isFullBleedPage = $derived(
 		page.url.pathname.startsWith('/browse') ||
@@ -67,9 +71,15 @@
 	const backgroundStyle = $derived(getWallpaperBackgroundStyle(backgroundImageMode));
 
 	onMount(() => {
+		window.addEventListener(AuthRefreshEvent.eventName, handleAuthRefresh);
+		refreshFilesWhenJobsFinish(queryClient);
 		void authStore.initialize().finally(() => {
 			initialized = true;
 		});
+
+		return () => {
+			window.removeEventListener(AuthRefreshEvent.eventName, handleAuthRefresh);
+		};
 	});
 
 	onDestroy(() => {
@@ -80,7 +90,6 @@
 		if (!initialized) return;
 
 		const currentPath = page.url.pathname;
-		const isPublicRoute = publicRoutes.some((route) => currentPath.startsWith(route));
 
 		if (!authStore.isAuthenticated && !isPublicRoute) {
 			goto(resolve('/login'));
@@ -139,9 +148,25 @@
 		if (initialized && authStore.isAuthenticated && !isSharePage) syncShareWallpaperOnLogin();
 	});
 
+	function handleAuthRefresh(event: Event): void {
+		if (!(event instanceof AuthRefreshEvent)) return;
+
+		switch (event.result.kind) {
+			case 'succeeded':
+				authStore.handleRefreshSuccess();
+				return;
+			case 'failed':
+				authStore.handleRefreshFailure(event.result.error, 'refresh');
+				return;
+			default: {
+				const exhaustive: never = event.result;
+				return exhaustive;
+			}
+		}
+	}
+
 	async function handleLogout() {
-		await authStore.logout();
-		goto(resolve('/login'));
+		if (await authStore.logout()) goto(resolve('/login'));
 	}
 </script>
 
@@ -164,7 +189,7 @@
 
 	<div class="app-content">
 		<QueryClientProvider client={queryClient}>
-			{#if !initialized}
+			{#if !initialized || (!authStore.isAuthenticated && !isPublicRoute)}
 				<div class="flex min-h-screen items-center justify-center bg-surface-primary">
 					<Spinner size="lg" />
 				</div>
@@ -196,6 +221,46 @@
 					>
 						{@render children()}
 					</main>
+				</div>
+			{/if}
+			{#if authStore.authAlert}
+				<div
+					class="fixed right-4 z-[200] flex w-[calc(100vw-2rem)] max-w-lg items-start gap-3 rounded-lg border px-4 py-3 shadow-lg {isLoginPage
+						? 'top-4'
+						: 'bottom-11'} {authStore.authAlert.kind === 'terminal'
+						? 'border-warning/40 bg-warning/10 text-warning'
+						: 'border-danger/30 bg-danger/10 text-danger'}"
+					role="alert"
+					aria-live="assertive"
+				>
+					<AlertTriangle size={18} class="mt-0.5 shrink-0" />
+					<div class="flex-1 space-y-2">
+						<p class="m-0 text-sm">{authStore.authAlert.message}</p>
+						{#if authStore.authAlert.kind === 'transient' && authStore.authAlert.source === 'restore'}
+							<Button
+								type="button"
+								variant="secondary"
+								size="sm"
+								disabled={authStore.isRestoringSession || authStore.isLoading}
+								onclick={() => authStore.initialize()}
+							>
+								{#if authStore.isRestoringSession}
+									<Spinner size="sm" />
+									<span>Retrying...</span>
+								{:else}
+									<span>Retry session</span>
+								{/if}
+							</Button>
+						{/if}
+					</div>
+					<button
+						type="button"
+						class="shrink-0 rounded p-0.5 transition-colors hover:bg-surface-elevated"
+						onclick={() => authStore.clearAuthAlert()}
+						aria-label="Dismiss authentication alert"
+					>
+						<X size={16} />
+					</button>
 				</div>
 			{/if}
 		</QueryClientProvider>

@@ -106,7 +106,7 @@ const (
 	// DefaultRefreshTokenExpiry is the default refresh token lifetime
 	DefaultRefreshTokenExpiry = 7 * 24 * time.Hour
 
-	// TokenCleanupInterval is how often to run revoked token cleanup
+	// TokenCleanupInterval is how often to clean up expired sessions.
 	TokenCleanupInterval = 1 * time.Hour
 
 	// LoginLockoutThreshold is the number of consecutive failures allowed
@@ -134,6 +134,9 @@ const (
 
 	// SharesFileName is the filename for storing share link records
 	SharesFileName = "shares.json"
+
+	// AuthSessionsFileName is the filename for persisted active auth sessions.
+	AuthSessionsFileName = "auth-sessions.json"
 
 	// WallpapersDirName is the data subdirectory holding each user's wallpaper,
 	// which share pages show behind the shared files.
