@@ -17,6 +17,7 @@ Thumbs.db
 
 # Build artifacts
 /dist/
+/perf-results/
 *.exe
 *.exe~
 *.dll

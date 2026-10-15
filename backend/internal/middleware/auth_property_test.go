@@ -37,7 +37,7 @@ func (s *testAuthService) Refresh(ctx context.Context, refreshToken string) (*se
 	return nil, nil
 }
 
-func (s *testAuthService) Logout(ctx context.Context, refreshToken, accessToken string) error {
+func (s *testAuthService) Logout(ctx context.Context, refreshToken string) error {
 	return nil
 }
 

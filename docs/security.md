@@ -17,11 +17,18 @@ Before exposing BoxBox beyond your own machine:
 
 ## Authentication Model
 
-BoxBox uses JWT access and refresh tokens:
-
-- Access tokens expire after 15 minutes.
-- Refresh tokens expire after 7 days and are rotated in an HttpOnly, SameSite=Strict cookie.
-- Access tokens stay in browser memory and logout revokes both current tokens.
+- Access tokens expire after 15 minutes. Refresh tokens expire after 7 days and are rotated in an HttpOnly, SameSite=Strict cookie.
+- Both token types carry a stable session ID. Every authenticated HTTP request checks that the session exists in the active registry and belongs to a configured user. WebSocket authentication is checked at handshake. Refresh also checks that the token is the session's current refresh token.
+- Logout needs only the current refresh cookie, not an access-token header. It removes the whole session, so all access tokens from that login stop working, including tokens issued before refresh. Other logins for the same user remain active.
+- The version 1 `auth-sessions.json` registry under `data_dir` stores session IDs, usernames, SHA-256 hashes of current refresh tokens, and deadlines. It never stores raw JWTs. Authentication is stateful: login, refresh, and logout each write the registry.
+- On Linux, the service restricts the registry directory to `0700` and the file to `0600`. A missing registry file or a valid version 1 snapshot with an empty `sessions` map at startup creates an empty active registry, so old access and refresh tokens fail after restart. A zero-byte file is invalid. Corrupt, unreadable, non-regular, unsupported, or future-version stores stop startup instead of resetting.
+- A write failure before rename returns `500`. The service restores only the session changed by that request. Login, refresh, and logout do not publish a token pair or `Set-Cookie`; refresh and logout preserve the existing cookie for retry. Login does not clear an unrelated existing cookie.
+- Rename publishes the new registry. Success also requires the temporary file to be synced and closed and the parent directory to be synced. If a durability step fails after rename, the service keeps the installed in-memory state and returns `401 SESSION_RECOVERY_REQUIRED` without a token pair. Refresh and logout clear the cookie. Login does not clear an unrelated cookie.
+- Keep `data_dir` on persistent storage and run one server process per directory. The service does not coordinate processes that share a directory. Deleting the registry while the server runs does not clear its in-memory sessions, and a later successful write can persist them again. This is not immediate disk-loss revalidation.
+- Browser refresh coalescing applies within one tab only. Concurrent refreshes in different tabs share the cookie but are not coordinated; a losing request can clear the replacement cookie and require another sign-in.
+- `auth-revocations.json` is ignored and is not deleted. Its denylist cannot identify sessions to load. Legacy tokens without a session ID are rejected on first use and never auto-enrolled; users sign in again. A missing registry file or valid empty registry after restart rejects old tokens without requiring JWT-secret rotation solely because the registry was lost.
+- Restoring an older valid `auth-sessions.json` backup can revive sessions, access tokens, and their current refresh tokens. Rotate `BOXBOX_JWT_SECRET` after restoring a backup. An older validator that ignores session IDs and the registry may accept tokens after downgrade; rotate the secret if you downgrade.
+- After startup with a user removed from configuration, that user's tokens fail validation. Session deadlines preserve the existing sliding refresh lifetime and retain the longest existing deadline when configured token TTLs shrink.
 - Auth endpoints are rate-limited per client IP.
 - Repeated failures trigger exponential per-account lockouts.
 
@@ -139,6 +146,7 @@ Share links expose one file or a folder tree to anyone holding the token URL:
 ## Operational Checklist
 
 - Rotate `BOXBOX_JWT_SECRET` if it was ever committed or shared.
+- Legacy tokens without a session ID are rejected on first use. Users sign in again; no automatic enrollment or JWT-secret rotation is needed solely for that one-time sign-out.
 - Rotate admin passwords after test deployments.
 - Review mounted paths after adding new host disks.
 - Check logs for repeated failed logins or path validation errors.

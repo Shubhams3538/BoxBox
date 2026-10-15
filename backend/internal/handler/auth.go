@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -65,12 +66,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Attempt login
 	tokenPair, err := h.authService.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
-		switch err {
-		case service.ErrInvalidCredentials:
-			writeError(w, "Invalid username or password", "UNAUTHORIZED", http.StatusUnauthorized)
-		default:
-			writeError(w, "Authentication failed", "INTERNAL_ERROR", http.StatusInternalServerError)
-		}
+		HandleServiceError(w, err)
 		return
 	}
 
@@ -92,24 +88,18 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	refreshToken, err := h.refreshTokenFromCookie(r)
 	if err != nil {
-		writeError(w, "Invalid refresh token", "TOKEN_INVALID", http.StatusUnauthorized)
+		h.clearRefreshCookie(w, r)
+		HandleServiceError(w, service.ErrInvalidToken)
 		return
 	}
 
 	// Attempt refresh
 	tokenPair, err := h.authService.Refresh(r.Context(), refreshToken)
 	if err != nil {
-		h.clearRefreshCookie(w, r)
-		switch err {
-		case service.ErrTokenExpired:
-			writeError(w, "Refresh token expired", "TOKEN_INVALID", http.StatusUnauthorized)
-		case service.ErrTokenRevoked:
-			writeError(w, "Refresh token has been revoked", "TOKEN_INVALID", http.StatusUnauthorized)
-		case service.ErrInvalidToken:
-			writeError(w, "Invalid refresh token", "TOKEN_INVALID", http.StatusUnauthorized)
-		default:
-			writeError(w, "Token refresh failed", "INTERNAL_ERROR", http.StatusInternalServerError)
+		if isTerminalAuthError(err) {
+			h.clearRefreshCookie(w, r)
 		}
+		HandleServiceError(w, err)
 		return
 	}
 
@@ -132,22 +122,19 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := h.refreshTokenFromCookie(r)
 	if err != nil {
 		h.clearRefreshCookie(w, r)
-		writeError(w, "Invalid refresh token", "TOKEN_INVALID", http.StatusUnauthorized)
+		HandleServiceError(w, service.ErrInvalidToken)
 		return
 	}
-	h.clearRefreshCookie(w, r)
 
-	accessToken := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if err := h.authService.Logout(r.Context(), refreshToken, accessToken); err != nil {
-		switch err {
-		case service.ErrTokenExpired, service.ErrTokenRevoked, service.ErrInvalidToken:
-			writeError(w, "Invalid refresh token", "TOKEN_INVALID", http.StatusUnauthorized)
-		default:
-			writeError(w, "Logout failed", "INTERNAL_ERROR", http.StatusInternalServerError)
+	if err := h.authService.Logout(r.Context(), refreshToken); err != nil {
+		if isTerminalAuthError(err) {
+			h.clearRefreshCookie(w, r)
 		}
+		HandleServiceError(w, err)
 		return
 	}
 
+	h.clearRefreshCookie(w, r)
 	writeJSON(w, map[string]string{"message": "Logged out successfully"}, http.StatusOK)
 }
 
@@ -183,6 +170,12 @@ func (h *AuthHandler) clearRefreshCookie(w http.ResponseWriter, r *http.Request)
 		Secure:   requestIsHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 	})
+}
+func isTerminalAuthError(err error) bool {
+	return errors.Is(err, service.ErrInvalidToken) ||
+		errors.Is(err, service.ErrTokenExpired) ||
+		errors.Is(err, service.ErrTokenRevoked) ||
+		errors.Is(err, service.ErrSessionRecoveryRequired)
 }
 
 func requestIsHTTPS(r *http.Request) bool {

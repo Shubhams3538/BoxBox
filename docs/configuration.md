@@ -66,12 +66,21 @@ mount_points:
 | `port` | `8080` | HTTP port inside the container or process. |
 | `host` | `0.0.0.0` | Bind address. |
 | `jwt_secret` | Required | JWT signing secret of at least 32 bytes. |
+| `data_dir` | `/data` | Dedicated directory for persisted settings, shares, and the active authentication-session registry. Relative paths resolve from the process working directory, not the YAML directory. Use one server process per directory. |
 | `rate_limit_rps` | `2` | Auth endpoint requests per second per client IP. |
 | `allowed_origins` | `[]` | WebSocket origin allow-list. Empty enforces same-origin; `*` explicitly allows all. |
 | `trusted_proxies` | `[]` | Proxy IPs/CIDRs allowed to supply client-IP headers. |
 | `allow_root_mount` | `false` | Explicit override required for a mount resolving to `/`. |
 | `max_upload_mb` | `10240` | Maximum upload size in MiB. |
 | `chunk_size_mb` | `10` | Chunk size in MiB that the browser uses for uploads. Lower it when a reverse proxy limits request body size. |
+
+An empty `data_dir` uses `/data`. Filesystem roots, including existing symlink aliases to a root, are rejected before persistence services initialize. Use a dedicated directory: the service restricts its permissions to `0700`, so do not point it at a shared home, application, or system directory.
+
+On Linux, the auth service loads or creates the version 1 `auth-sessions.json` registry under `data_dir` at startup. Its JSON shape is `{"version":1,"sessions":{"<sid>":{"username":"...","refreshHash":"<sha256>","expiresAt":"<timestamp>"}}}`. It stores no raw JWTs. Startup stops if the file is corrupt, unreadable, non-regular, unsupported, or from a future version. Development mode also needs a writable `data_dir` because `--dev` does not bypass registry initialization.
+
+If `auth-sessions.json` is missing, or contains a valid version 1 snapshot with an empty `sessions` map, the server starts with no active sessions. Previously issued access and refresh tokens fail after restart; users can sign in again. A zero-byte or malformed file is not an empty registry and causes startup to fail. The server does not check the registry file on each request. Deleting it while the server runs does not clear in-memory sessions, and a later successful auth write can persist those sessions again. Do not treat runtime file deletion as immediate session revocation.
+
+An older valid backup can restore sessions, including their access tokens and current refresh tokens. Rotate `BOXBOX_JWT_SECRET` after restoring an older backup. `auth-revocations.json` is ignored and is not deleted; its denylist cannot be converted into active sessions. Legacy JWTs without a session ID are rejected rather than enrolled. Incompatible experimental session-store formats fail startup; the server does not migrate them or fall back to another store. If you downgrade to a validator that ignores session IDs and the registry, rotate the JWT secret because that validator may accept those tokens.
 
 ## Users
 
@@ -106,6 +115,7 @@ Environment overrides use the `BOXBOX_` prefix:
 | `BOXBOX_ALLOWED_ORIGINS` | `allowed_origins`, comma-separated |
 | `BOXBOX_TRUSTED_PROXIES` | `trusted_proxies`, comma-separated CIDRs |
 | `BOXBOX_ALLOW_ROOT_MOUNT` | `allow_root_mount` |
+| `BOXBOX_DATA_DIR` | `data_dir` |
 | `BOXBOX_USERS_<username>` | `users.<username>` |
 
 `CONFIG_PATH` is also supported as a convenience for selecting the YAML file path.

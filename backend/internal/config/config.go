@@ -179,6 +179,26 @@ func loadWithReport(configPath string, searchPaths []configSearchPath) (*LoadRes
 		return nil, err
 	}
 
+	// Resolve once before filesystem adapters interpret persistence paths.
+	if cfg.DataDir == "" {
+		cfg.DataDir = DefaultDataDir
+	}
+	dataDir, err := filepath.Abs(cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve data directory: %w", err)
+	}
+	resolvedDataDir, err := filepath.EvalSymlinks(dataDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("resolve data directory: %w", err)
+		}
+		resolvedDataDir = dataDir
+	}
+	if filepath.Dir(resolvedDataDir) == resolvedDataDir {
+		return nil, fmt.Errorf("data_dir must not be a filesystem root; use a dedicated directory")
+	}
+	cfg.DataDir = dataDir
+
 	return &LoadResult{
 		Config:   &cfg,
 		Warnings: warnings,

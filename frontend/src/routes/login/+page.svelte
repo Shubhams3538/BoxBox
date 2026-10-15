@@ -10,6 +10,7 @@
 
 	let username = $state('');
 	let password = $state('');
+	const authBusy = $derived(authStore.isLoading || authStore.isRestoringSession);
 
 	async function handleSubmit(event: Event) {
 		event.preventDefault();
@@ -73,7 +74,7 @@
 					placeholder="Enter your username"
 					autocomplete="username"
 					required
-					disabled={authStore.isLoading}
+					disabled={authBusy}
 				/>
 			</div>
 
@@ -86,15 +87,11 @@
 					placeholder="Enter your password"
 					autocomplete="current-password"
 					required
-					disabled={authStore.isLoading}
+					disabled={authBusy}
 				/>
 			</div>
 
-			<Button
-				type="submit"
-				variant="primary"
-				disabled={authStore.isLoading || !username.trim() || !password}
-			>
+			<Button type="submit" variant="primary" disabled={authBusy || !username.trim() || !password}>
 				{#if authStore.isLoading}
 					<Spinner size="sm" />
 					<span>Signing in...</span>

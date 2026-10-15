@@ -49,10 +49,11 @@ export function getAccessToken(): string | null {
 }
 
 /**
- * Get stored refresh token
+ * Store an access token and reopen refresh for the authenticated session.
  */
 export function setAccessToken(accessToken: string): void {
 	tokenStorage.setAccessToken(accessToken);
+	sessionEnded = false;
 }
 
 /**
@@ -69,50 +70,114 @@ export function isAuthenticated(): boolean {
 	return tokenStorage.hasTokens();
 }
 
-// Flag to prevent multiple simultaneous refresh attempts
-let isRefreshing = false;
-let refreshPromise: Promise<boolean> | null = null;
+let refreshPromise: Promise<AccessTokenResponse> | null = null;
+let logoutPromise: Promise<void> | null = null;
+let logoutInProgress = false;
+let sessionEnded = false;
+
+export class AuthSessionClosedError extends Error {
+	constructor() {
+		super('The session is no longer available');
+		this.name = 'AuthSessionClosedError';
+	}
+}
+
+export type AuthRefreshResult = { kind: 'succeeded' } | { kind: 'failed'; error: unknown };
+
+export class AuthRefreshEvent extends Event {
+	static readonly eventName = 'boxbox-auth-refresh';
+
+	constructor(readonly result: AuthRefreshResult) {
+		super(AuthRefreshEvent.eventName);
+	}
+}
+
+function isTerminalAuthFailure(error: unknown): error is ApiRequestError {
+	return error instanceof ApiRequestError && error.status === 401;
+}
 
 /**
- * Attempt to refresh the access token using the refresh token
- * Returns true if refresh was successful, false otherwise
+ * Refresh the session once for all same-tab callers.
  */
-async function refreshAccessToken(): Promise<boolean> {
-	// If already refreshing, wait for that to complete
-	if (isRefreshing && refreshPromise) {
-		return refreshPromise;
+export async function refreshSession(): Promise<AccessTokenResponse> {
+	if (sessionEnded || logoutInProgress || logoutPromise) {
+		throw new AuthSessionClosedError();
 	}
+	if (refreshPromise) return refreshPromise;
 
-	isRefreshing = true;
-	refreshPromise = (async () => {
+	const operation = (async () => {
 		try {
-			const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+			const response = await apiRequest<AccessTokenResponse>('/auth/refresh', {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				credentials: 'same-origin'
+				skipAuth: true
 			});
-
-			if (!response.ok) {
-				// Refresh failed - clear tokens
-				clearTokens();
-				return false;
+			setAccessToken(response.accessToken);
+			if (typeof window !== 'undefined') {
+				window.dispatchEvent(new AuthRefreshEvent({ kind: 'succeeded' }));
 			}
-
-			const data: AccessTokenResponse = await response.json();
-			setAccessToken(data.accessToken);
-			return true;
-		} catch {
-			clearTokens();
-			return false;
-		} finally {
-			isRefreshing = false;
-			refreshPromise = null;
+			return response;
+		} catch (error) {
+			if (isTerminalAuthFailure(error)) {
+				sessionEnded = true;
+				clearTokens();
+			}
+			if (typeof window !== 'undefined') {
+				window.dispatchEvent(new AuthRefreshEvent({ kind: 'failed', error }));
+			}
+			throw error;
 		}
 	})();
+	refreshPromise = operation;
 
-	return refreshPromise;
+	try {
+		return await operation;
+	} finally {
+		if (refreshPromise === operation) refreshPromise = null;
+	}
+}
+
+/**
+ * Log out only after any in-flight refresh finishes; do not refresh this request.
+ */
+export function logoutSession(): Promise<void> {
+	if (logoutPromise) return logoutPromise;
+	logoutInProgress = true;
+
+	const operation = (async () => {
+		try {
+			const pendingRefresh = refreshPromise;
+			if (pendingRefresh) {
+				try {
+					await pendingRefresh;
+				} catch (error) {
+					if (isTerminalAuthFailure(error)) throw error;
+				}
+			}
+
+			try {
+				await apiRequest<unknown>('/auth/logout', {
+					method: 'POST',
+					skipAuthRefresh: true
+				});
+			} catch (error) {
+				if (isTerminalAuthFailure(error)) {
+					sessionEnded = true;
+					clearTokens();
+				}
+				throw error;
+			}
+
+			sessionEnded = true;
+			clearTokens();
+		} finally {
+			logoutInProgress = false;
+		}
+	})();
+	logoutPromise = operation;
+
+	return operation.finally(() => {
+		if (logoutPromise === operation) logoutPromise = null;
+	});
 }
 
 /**
@@ -123,6 +188,7 @@ export interface RequestOptions {
 	body?: unknown;
 	headers?: Record<string, string>;
 	skipAuth?: boolean;
+	skipAuthRefresh?: boolean;
 	params?: Record<string, string | number | boolean | undefined>;
 	signal?: AbortSignal;
 }
@@ -130,7 +196,7 @@ export interface RequestOptions {
 /**
  * Build URL with query parameters
  */
-function buildUrl(
+export function buildUrl(
 	endpoint: string,
 	params?: Record<string, string | number | boolean | undefined>
 ): string {
@@ -150,7 +216,7 @@ function buildUrl(
 /**
  * Parse response and handle errors
  */
-async function parseResponse<T>(response: Response): Promise<T> {
+export async function parseResponse<T>(response: Response): Promise<T> {
 	const contentType = response.headers.get('content-type');
 
 	if (!response.ok) {
@@ -186,7 +252,15 @@ async function parseResponse<T>(response: Response): Promise<T> {
  * Main API request function with automatic token injection and refresh
  */
 export async function apiRequest<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-	const { method = 'GET', body, headers = {}, skipAuth = false, params, signal } = options;
+	const {
+		method = 'GET',
+		body,
+		headers = {},
+		skipAuth = false,
+		skipAuthRefresh = false,
+		params,
+		signal
+	} = options;
 
 	const url = buildUrl(endpoint, params);
 
@@ -223,18 +297,15 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
 
 	let response = await fetch(url, fetchOptions);
 
-	// Handle 401 - attempt token refresh and retry
-	if (response.status === 401 && !skipAuth) {
-		const refreshed = await refreshAccessToken();
-
-		if (refreshed) {
-			// Retry with new token
-			const newAccessToken = getAccessToken();
-			if (newAccessToken) {
-				requestHeaders['Authorization'] = `Bearer ${newAccessToken}`;
-				fetchOptions.headers = requestHeaders;
-				response = await fetch(url, fetchOptions);
-			}
+	// A logout response is terminal for this request; never rotate after its 401.
+	if (response.status === 401 && !skipAuth && !skipAuthRefresh) {
+		try {
+			const refreshed = await refreshSession();
+			requestHeaders['Authorization'] = `Bearer ${refreshed.accessToken}`;
+			fetchOptions.headers = requestHeaders;
+			response = await fetch(url, fetchOptions);
+		} catch (error) {
+			if (!(error instanceof AuthSessionClosedError)) throw error;
 		}
 	}
 

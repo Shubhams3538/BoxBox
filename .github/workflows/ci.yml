@@ -13,11 +13,14 @@ permissions:
 jobs:
   backend:
     name: Backend Go tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -29,24 +32,64 @@ jobs:
         working-directory: backend
         run: go test ./...
 
+      - name: Set up Bun for benchmark comparison
+        if: github.event_name == 'pull_request'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install pinned benchstat
+        if: github.event_name == 'pull_request'
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e
+
+      - name: Compare backend allocation and byte budgets
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bun frontend/scripts/perf/backend.ts --base "$BASE_SHA"
+
+      - name: Upload backend performance evidence
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-performance
+          path: |
+            perf-results/backend-*.txt
+            perf-results/backend-*.json
+            perf-results/benchstat.txt
+          retention-days: 14
+
   frontend:
     name: Frontend check and build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go for embedded-server browser tests
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.3
 
       - name: Install dependencies
         working-directory: frontend
         run: bun install --frozen-lockfile
 
-      - name: Check Svelte app
+      - name: Check Svelte app and performance harness
         working-directory: frontend
-        run: bun run check
+        run: |
+          bun run check
+          bun run perf:check
 
       - name: Test frontend logic
         working-directory: frontend
@@ -55,6 +98,36 @@ jobs:
       - name: Build Svelte app
         working-directory: frontend
         run: bun run build
+
+      - name: Check initial bundle budget
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.number != 158 }}
+        working-directory: frontend
+        run: bun run perf:budget
+
+      - name: Install pinned Chromium and system dependencies
+        working-directory: frontend
+        run: bunx playwright install --with-deps chromium
+
+      - name: Guard real browser cold and warm folder loads
+        working-directory: frontend
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -n "$BASE_SHA" ]]; then
+            bun run perf:browser --base "$BASE_SHA"
+          else
+            bun run perf:browser
+          fi
+
+      - name: Upload browser performance evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-performance
+          path: |
+            perf-results/browser*
+            perf-results/*failure.*
+          retention-days: 14
 
   website:
     name: Website build

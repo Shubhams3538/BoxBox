@@ -59,6 +59,7 @@ var serviceErrorMappings = []ErrorMapping{
 	{service.ErrInvalidToken, "Invalid token", model.ErrCodeTokenInvalid, http.StatusUnauthorized},
 	{service.ErrTokenExpired, "Token has expired", model.ErrCodeTokenInvalid, http.StatusUnauthorized},
 	{service.ErrTokenRevoked, "Token has been revoked", model.ErrCodeTokenInvalid, http.StatusUnauthorized},
+	{service.ErrSessionRecoveryRequired, "Your session could not be safely recovered. Please sign in again.", model.ErrCodeSessionRecoveryRequired, http.StatusUnauthorized},
 }
 
 // HandleServiceError converts service errors to HTTP responses
