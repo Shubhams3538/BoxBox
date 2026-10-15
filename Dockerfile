@@ -13,7 +13,7 @@
 # Static assets are architecture-independent, so this stage always runs on the
 # builder's native platform instead of emulating the target arch.
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM oven/bun:1-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS frontend-builder
+FROM --platform=$BUILDPLATFORM oven/bun:1-alpine@sha256:629e17411f1f129dbec3af78d5af9c9f2a937435c80349437206c6b0b7422373 AS frontend-builder
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ RUN bun run build
 # CGO_ENABLED=0 lets us cross-compile natively for the target arch via
 # TARGETARCH instead of running the whole toolchain under QEMU.
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS backend-builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS backend-builder
 
 ARG TARGETARCH
 WORKDIR /app
