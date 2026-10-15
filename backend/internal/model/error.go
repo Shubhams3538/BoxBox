@@ -15,6 +15,7 @@ const (
 	ErrCodeInvalidPath             = "INVALID_PATH"
 	ErrCodeUnauthorized            = "UNAUTHORIZED"
 	ErrCodeTokenInvalid            = "TOKEN_INVALID"
+	ErrCodeRefreshSuperseded       = "REFRESH_SUPERSEDED"
 	ErrCodePermissionDenied        = "PERMISSION_DENIED"
 	ErrCodeConflict                = "CONFLICT"
 	ErrCodeValidationError         = "VALIDATION_ERROR"

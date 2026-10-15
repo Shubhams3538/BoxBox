@@ -89,8 +89,8 @@ func TestRefreshRotationPersistsCurrentTokenAndStableSession(t *testing.T) {
 	}
 
 	second := newTestAuthServiceAt(t, dataDir)
-	if _, err := second.ValidateRefreshToken(original.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
-		t.Fatalf("old refresh after restart = %v, want rejected", err)
+	if _, err := second.ValidateRefreshToken(original.RefreshToken); !errors.Is(err, ErrRefreshSuperseded) {
+		t.Fatalf("old refresh after restart = %v, want superseded", err)
 	}
 	if _, err := second.ValidateRefreshToken(replacement.RefreshToken); err != nil {
 		t.Fatalf("current refresh after restart: %v", err)
@@ -278,15 +278,15 @@ func TestConcurrentRefreshHasOneWinnerAndReplayCannotKillWinner(t *testing.T) {
 			winner = current.pair
 			continue
 		}
-		if !errors.Is(current.err, ErrTokenRevoked) {
+		if !errors.Is(current.err, ErrRefreshSuperseded) {
 			t.Fatalf("concurrent refresh error = %v, want stale refresh rejection", current.err)
 		}
 	}
 	if winner == nil {
 		t.Fatal("concurrent refresh produced no winner")
 	}
-	if _, err := service.Refresh(context.Background(), original.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
-		t.Fatalf("replay after winning rotation = %v, want rejected", err)
+	if _, err := service.Refresh(context.Background(), original.RefreshToken); !errors.Is(err, ErrRefreshSuperseded) {
+		t.Fatalf("replay after winning rotation = %v, want superseded", err)
 	}
 	for _, token := range []string{winner.AccessToken, winner.RefreshToken} {
 		if _, err := service.ValidateToken(token); err != nil {
@@ -534,15 +534,15 @@ func exerciseSessionPersistenceFailure(t *testing.T, stage authPersistenceFailur
 	if operation == "refresh" {
 		if published {
 			for _, currentService := range []*authService{service, restarted} {
-				if _, err := currentService.ValidateRefreshToken(current.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
+				if _, err := currentService.ValidateRefreshToken(current.RefreshToken); !errors.Is(err, ErrRefreshSuperseded) {
 					t.Fatalf("old refresh after published failure = %v, want rotated", err)
 				}
 				if _, err := currentService.ValidateAccessToken(current.AccessToken); err != nil {
 					t.Fatalf("active session lost access after published refresh failure: %v", err)
 				}
 			}
-			if _, err := service.Refresh(context.Background(), current.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
-				t.Fatalf("replay after published refresh failure = %v, want rejected", err)
+			if _, err := service.Refresh(context.Background(), current.RefreshToken); !errors.Is(err, ErrRefreshSuperseded) {
+				t.Fatalf("replay after published refresh failure = %v, want superseded", err)
 			}
 		} else {
 			for _, currentService := range []*authService{service, restarted} {

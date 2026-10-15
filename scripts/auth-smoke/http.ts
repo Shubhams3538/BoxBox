@@ -157,6 +157,28 @@ export async function expectRefreshRejected(
   await response.arrayBuffer();
 }
 
+export async function expectRefreshSuperseded(
+  baseUrl: string,
+  refreshToken: string,
+  label: string,
+): Promise<void> {
+  const response = await request(baseUrl, label, refreshPath, {
+    method: "POST",
+    headers: { Cookie: `${refreshCookieName}=${refreshToken}` },
+  });
+  expectStatus(response, 409, label);
+  if (response.headers.has("Set-Cookie"))
+    throw new Error(`${label}: stale request changed the cookie`);
+  const body: unknown = await response.json();
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !("code" in body) ||
+    body.code !== "REFRESH_SUPERSEDED"
+  )
+    throw new Error(`${label}: missing conflict code`);
+}
+
 export async function logout(
   baseUrl: string,
   refreshToken: string,
