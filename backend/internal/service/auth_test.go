@@ -77,10 +77,10 @@ func TestRefreshKeepsSessionAndOldAccessUntilLogout(t *testing.T) {
 	if oldAccess.SessionID != newAccess.SessionID || newAccess.SessionID != newRefresh.SessionID {
 		t.Fatal("refresh rotation changed the active session ID")
 	}
-	if _, err := svc.ValidateRefreshToken(original.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
-		t.Fatalf("rotated refresh token validation = %v, want rejected replay", err)
+	if _, err := svc.ValidateRefreshToken(original.RefreshToken); !errors.Is(err, ErrRefreshSuperseded) {
+		t.Fatalf("rotated refresh token validation = %v, want superseded replay", err)
 	}
-	if _, err := svc.ValidateToken(original.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
+	if _, err := svc.ValidateToken(original.RefreshToken); !errors.Is(err, ErrRefreshSuperseded) {
 		t.Fatalf("generic validation admitted a rotated refresh token: %v", err)
 	}
 }
@@ -100,8 +100,8 @@ func TestLogoutIsSessionWideAndReplayCannotTerminateWinner(t *testing.T) {
 		t.Fatalf("refresh: %v", err)
 	}
 
-	if err := svc.Logout(context.Background(), original.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
-		t.Fatalf("replayed logout error = %v, want rejected stale refresh", err)
+	if err := svc.Logout(context.Background(), original.RefreshToken); !errors.Is(err, ErrRefreshSuperseded) {
+		t.Fatalf("replayed logout error = %v, want superseded stale refresh", err)
 	}
 	for _, token := range []string{winner.AccessToken, winner.RefreshToken} {
 		if _, err := svc.ValidateToken(token); err != nil {

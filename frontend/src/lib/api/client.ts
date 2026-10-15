@@ -96,6 +96,22 @@ function isTerminalAuthFailure(error: unknown): error is ApiRequestError {
 	return error instanceof ApiRequestError && error.status === 401;
 }
 
+// A parallel tab may have rotated the shared cookie. Retry once without ending the session.
+async function requestSessionMutation<T>(endpoint: '/auth/refresh' | '/auth/logout'): Promise<T> {
+	const request = () => apiRequest<T>(endpoint, { method: 'POST', skipAuth: true });
+	try {
+		return await request();
+	} catch (error) {
+		if (
+			!(error instanceof ApiRequestError) ||
+			error.status !== 409 ||
+			error.code !== 'REFRESH_SUPERSEDED'
+		)
+			throw error;
+		return request();
+	}
+}
+
 /**
  * Refresh the session once for all same-tab callers.
  */
@@ -107,10 +123,7 @@ export async function refreshSession(): Promise<AccessTokenResponse> {
 
 	const operation = (async () => {
 		try {
-			const response = await apiRequest<AccessTokenResponse>('/auth/refresh', {
-				method: 'POST',
-				skipAuth: true
-			});
+			const response = await requestSessionMutation<AccessTokenResponse>('/auth/refresh');
 			setAccessToken(response.accessToken);
 			if (typeof window !== 'undefined') {
 				window.dispatchEvent(new AuthRefreshEvent({ kind: 'succeeded' }));
@@ -155,10 +168,7 @@ export function logoutSession(): Promise<void> {
 			}
 
 			try {
-				await apiRequest<unknown>('/auth/logout', {
-					method: 'POST',
-					skipAuthRefresh: true
-				});
+				await requestSessionMutation<unknown>('/auth/logout');
 			} catch (error) {
 				if (isTerminalAuthFailure(error)) {
 					sessionEnded = true;
@@ -188,7 +198,6 @@ export interface RequestOptions {
 	body?: unknown;
 	headers?: Record<string, string>;
 	skipAuth?: boolean;
-	skipAuthRefresh?: boolean;
 	params?: Record<string, string | number | boolean | undefined>;
 	signal?: AbortSignal;
 }
@@ -252,15 +261,7 @@ export async function parseResponse<T>(response: Response): Promise<T> {
  * Main API request function with automatic token injection and refresh
  */
 export async function apiRequest<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-	const {
-		method = 'GET',
-		body,
-		headers = {},
-		skipAuth = false,
-		skipAuthRefresh = false,
-		params,
-		signal
-	} = options;
+	const { method = 'GET', body, headers = {}, skipAuth = false, params, signal } = options;
 
 	const url = buildUrl(endpoint, params);
 
@@ -298,7 +299,7 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
 	let response = await fetch(url, fetchOptions);
 
 	// A logout response is terminal for this request; never rotate after its 401.
-	if (response.status === 401 && !skipAuth && !skipAuthRefresh) {
+	if (response.status === 401 && !skipAuth) {
 		try {
 			const refreshed = await refreshSession();
 			requestHeaders['Authorization'] = `Bearer ${refreshed.accessToken}`;

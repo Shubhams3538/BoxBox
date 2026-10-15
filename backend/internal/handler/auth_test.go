@@ -279,8 +279,8 @@ func TestAuthPersistenceFailuresPreserveOrClearCookieByOutcome(t *testing.T) {
 		if rotated.Value == cookie.Value {
 			t.Fatal("successful retry did not rotate refresh cookie")
 		}
-		if _, err := auth.ValidateRefreshToken(cookie.Value); !errors.Is(err, service.ErrTokenRevoked) {
-			t.Fatalf("previous refresh token after retry = %v, want revoked", err)
+		if _, err := auth.ValidateRefreshToken(cookie.Value); !errors.Is(err, service.ErrRefreshSuperseded) {
+			t.Fatalf("previous refresh token after retry = %v, want superseded", err)
 		}
 	})
 
@@ -316,8 +316,8 @@ func TestAuthPersistenceFailuresPreserveOrClearCookieByOutcome(t *testing.T) {
 		if err != nil {
 			t.Fatalf("restart auth service: %v", err)
 		}
-		if _, err := restarted.ValidateRefreshToken(cookie.Value); !errors.Is(err, service.ErrTokenRevoked) {
-			t.Fatalf("published refresh rotation after restart = %v, want revoked", err)
+		if _, err := restarted.ValidateRefreshToken(cookie.Value); !errors.Is(err, service.ErrRefreshSuperseded) {
+			t.Fatalf("published refresh rotation after restart = %v, want superseded", err)
 		}
 	})
 
@@ -540,4 +540,45 @@ func onlyCookie(t *testing.T, response *httptest.ResponseRecorder) *http.Cookie 
 		t.Fatalf("cookie count = %d, want 1", len(cookies))
 	}
 	return cookies[0]
+}
+
+func TestSupersededRefreshAndLogoutPreserveSharedCookie(t *testing.T) {
+	auth, handler := newAuthHandler(t, filesystem.NewOsFS(), t.TempDir())
+	original, err := auth.Login(context.Background(), "admin", "correct-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := auth.Refresh(context.Background(), original.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []struct {
+		name  string
+		serve http.HandlerFunc
+	}{
+		{"refresh", handler.Refresh}, {"logout", handler.Logout},
+	} {
+		t.Run(action.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "http://boxbox.example/api/v1/auth/"+action.name, nil)
+			request.AddCookie(&http.Cookie{Name: refreshCookieName, Value: original.RefreshToken})
+			response := httptest.NewRecorder()
+			action.serve(response, request)
+			if response.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409", response.Code)
+			}
+			if response.Header().Get("Set-Cookie") != "" {
+				t.Fatal("stale request overwrote the shared cookie")
+			}
+			var body model.ErrorResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Code != model.ErrCodeRefreshSuperseded {
+				t.Fatalf("code = %s", body.Code)
+			}
+			if _, err := auth.ValidateRefreshToken(replacement.RefreshToken); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }

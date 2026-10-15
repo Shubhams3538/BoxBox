@@ -280,6 +280,43 @@ describe('auth persistence in the API client', () => {
 		}
 	});
 
+	for (const action of ['refresh', 'logout'] as const) {
+		for (const persistent of [false, true]) {
+			test(`${action} retries a superseded cookie once and preserves auth on repeated conflict: ${persistent}`, async () => {
+				let calls = 0;
+				const server = Bun.serve({
+					port: 0,
+					fetch() {
+						calls++;
+						if (persistent || calls === 1)
+							return Response.json(
+								{ error: 'Rotated', code: 'REFRESH_SUPERSEDED' },
+								{ status: 409 }
+							);
+						return Response.json({ accessToken: 'replacement', expiresAt: '2030-01-01T00:00:00Z' });
+					}
+				});
+				const { previousWindow, previousLocalStorage } = installWindow(server.url.origin);
+				setAccessToken('original-token');
+				try {
+					const operation = action === 'refresh' ? refreshSession() : logoutSession();
+					if (persistent) {
+						await assert.rejects(operation, { status: 409, code: 'REFRESH_SUPERSEDED' });
+						assert.equal(getAccessToken(), 'original-token');
+					} else {
+						await operation;
+						assert.equal(getAccessToken(), action === 'refresh' ? 'replacement' : null);
+					}
+					assert.equal(calls, 2);
+				} finally {
+					clearTokens();
+					Object.assign(globalThis, { window: previousWindow, localStorage: previousLocalStorage });
+					server.stop(true);
+				}
+			});
+		}
+	}
+
 	test('logout 401 never starts an automatic refresh', async () => {
 		let refreshCalls = 0;
 		const server = Bun.serve({

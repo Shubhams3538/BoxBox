@@ -25,6 +25,7 @@ var (
 	ErrInvalidToken            = errors.New("invalid token")
 	ErrTokenExpired            = errors.New("token expired")
 	ErrTokenRevoked            = errors.New("token revoked")
+	ErrRefreshSuperseded       = errors.New("refresh token superseded")
 	ErrSessionRecoveryRequired = errors.New("session recovery required")
 )
 
@@ -332,7 +333,7 @@ func (s *authService) validateSessionLocked(claims *Claims, tokenType TokenType,
 		return ErrInvalidToken
 	}
 	if tokenType == TokenTypeRefresh && record.RefreshHash != tokenHash {
-		return ErrTokenRevoked
+		return ErrRefreshSuperseded
 	}
 	return nil
 }

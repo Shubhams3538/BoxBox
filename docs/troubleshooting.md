@@ -18,6 +18,8 @@ docker compose up -d
 
 ## Login, Logout, or Refresh Fails
 
+`409 REFRESH_SUPERSEDED` means another request replaced the refresh cookie. The browser retries once automatically. If another refresh is still in flight, retry the action; this response does not clear the cookie or end the session.
+
 If login, refresh, or logout returns `500` before rename, the server did not publish the session update. It sends no new token pair or `Set-Cookie` header. Refresh and logout leave the existing cookie unchanged so you can retry. Login does not clear an unrelated existing cookie. Check that `data_dir` is writable and on persistent storage, then retry.
 
 If the browser cannot restore a session, it preserves the refresh cookie on retryable errors and shows **Retry session**. Repair storage or connectivity, then use that button without reloading. While restoration is pending, the retry and sign-in controls are disabled. An expired or invalid cookie requires a fresh sign-in; the stale retry warning is removed.
