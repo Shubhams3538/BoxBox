@@ -3,7 +3,7 @@
 	 * StatusBar component - bottom status bar with item count and view options
 	 */
 	import { List, LayoutGrid } from 'lucide-svelte';
-	import type { ViewMode } from '$lib/types/files';
+	import type { ViewMode } from '#lib/types/files.js';
 
 	interface Props {
 		itemCount?: number;

@@ -4,7 +4,7 @@
  */
 
 import { api, apiRequest } from './client';
-import type { BackgroundImageMode } from '$lib/utils/wallpaper';
+import type { BackgroundImageMode } from '#lib/utils/wallpaper.js';
 
 /**
  * Permissions granted to a share recipient

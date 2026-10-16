@@ -2,12 +2,12 @@
  * Accent color and wallpaper helpers: validation, normalisation and theme application
  */
 
-import { getPreviewUrl } from '$lib/api/files';
+import { getPreviewUrl } from '#lib/api/files.js';
 import {
 	isInlineWallpaperDataUrl,
 	isLocalWallpaperReference,
 	resolveLocalWallpaperUrl
-} from '$lib/utils/wallpaperStorage';
+} from '#lib/utils/wallpaperStorage.js';
 
 export const DEFAULT_ACCENT_COLOR = '#4a9eff';
 

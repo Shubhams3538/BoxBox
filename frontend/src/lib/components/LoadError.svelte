@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button } from '$lib/components/ui';
+	import { Button } from '#lib/components/ui/index.js';
 
 	/** Shown when a window that loads on first use fails to download. A reload is the retry: browsers can cache a failed module fetch. */
 	let { label, onClose }: { label: string; onClose: () => void } = $props();

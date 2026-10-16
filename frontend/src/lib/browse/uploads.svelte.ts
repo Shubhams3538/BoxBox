@@ -1,10 +1,10 @@
-import { toastStore } from '$lib/stores/toast.svelte';
-import { uploadStore } from '$lib/stores/upload.svelte';
+import { toastStore } from '#lib/stores/toast.svelte.js';
+import { uploadStore } from '#lib/stores/upload.svelte.js';
 import {
 	entriesFromDataTransfer,
 	entriesFromFiles,
 	type UploadEntry
-} from '$lib/utils/uploadEntries';
+} from '#lib/utils/uploadEntries.js';
 import type { BrowseData } from './data.svelte';
 import type { BrowseLocation } from './location.svelte';
 

@@ -8,11 +8,11 @@ import {
 	refresh as apiRefresh,
 	restoreSession,
 	isAuthenticated as hasAccessToken
-} from '$lib/api/auth';
-import { ApiRequestError, AuthSessionClosedError } from '$lib/api/client';
-import { CONFIG } from '$lib/config';
+} from '#lib/api/auth.js';
+import { ApiRequestError, AuthSessionClosedError } from '#lib/api/client.js';
+import { CONFIG } from '#lib/config.js';
 import { settingsStore } from './settings.svelte';
-import { resetShareWallpaperLoginSync } from '$lib/utils/wallpaperSync';
+import { resetShareWallpaperLoginSync } from '#lib/utils/wallpaperSync.js';
 
 type AuthAlert =
 	| { kind: 'transient'; source: 'restore' | 'refresh' | 'logout'; message: string }

@@ -8,11 +8,11 @@ import {
 	type ListOptions,
 	type RootsResponse,
 	type SearchResponse
-} from '$lib/api/files';
-import { CONFIG } from '$lib/config';
-import { fileQueryKeys } from '$lib/stores/files';
-import { settingsStore } from '$lib/stores/settings.svelte';
-import { canPreview } from '$lib/utils/fileTypes';
+} from '#lib/api/files.js';
+import { CONFIG } from '#lib/config.js';
+import { fileQueryKeys } from '#lib/stores/files.js';
+import { settingsStore } from '#lib/stores/settings.svelte.js';
+import { canPreview } from '#lib/utils/fileTypes.js';
 import { directoryQueryOptions } from './directoryQuery';
 import type { BrowseLocation } from './location.svelte';
 

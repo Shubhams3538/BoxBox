@@ -5,27 +5,25 @@
 	import { onDestroy, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { authStore } from '$lib/stores/auth.svelte';
-	import { settingsStore, type UserSettings } from '$lib/stores/settings.svelte';
+	import { authStore } from '#lib/stores/auth.svelte.js';
+	import { settingsStore, type UserSettings } from '#lib/stores/settings.svelte.js';
 	import {
 		DEFAULT_ACCENT_COLOR,
 		isValidBackgroundImage,
 		isValidAccentColor,
 		normalizeBackgroundImage,
 		normalizeAccentColor
-	} from '$lib/utils/appearance';
-	import SearchBar from '$lib/components/SearchBar.svelte';
-	import WallpaperSettings from '$lib/components/settings/wallpaper/WallpaperSettings.svelte';
-	import ShareLinksSettings from '$lib/components/settings/ShareLinksSettings.svelte';
-	import { Button, ProgressButton, Select, Toggle } from '$lib/components/ui';
-	import { normalizeBackgroundImageMode } from '$lib/utils/wallpaper';
-	import { publishShareWallpaper } from '$lib/utils/wallpaperSync';
+	} from '#lib/utils/appearance.js';
+	import SearchBar from '#lib/components/SearchBar.svelte';
+	import { Button, ProgressButton, Select, Toggle } from '#lib/components/ui/index.js';
+	import { normalizeBackgroundImageMode } from '#lib/utils/wallpaper.js';
+	import { publishShareWallpaper } from '#lib/utils/wallpaperSync.js';
 	import {
 		deleteLocalWallpaper,
 		isInlineWallpaperDataUrl,
 		isLocalWallpaperReference,
 		saveLocalWallpaperDataUrl
-	} from '$lib/utils/wallpaperStorage';
+	} from '#lib/utils/wallpaperStorage.js';
 	import {
 		ChevronLeft,
 		Eye,
@@ -73,21 +71,9 @@
 		return isApplyingSettings ? 'Saving' : 'Save';
 	});
 
-	const navItems: Array<{
-		id: SettingsCategory;
-		label: string;
-		icon: typeof Eye;
-	}> = [
-		{
-			id: 'all',
-			label: 'Show All',
-			icon: Settings
-		},
-		{
-			id: 'display',
-			label: 'File Display',
-			icon: Eye
-		},
+	const navItems: Array<{ id: SettingsCategory; label: string; icon: typeof Eye }> = [
+		{ id: 'all', label: 'Show All', icon: Settings },
+		{ id: 'display', label: 'File Display', icon: Eye },
 		{
 			id: 'personalization',
 			label: 'Personalization',
@@ -310,11 +296,11 @@
 	}
 
 	async function handleLogout() {
-		if (await authStore.logout()) goto(resolve('/login'));
+		if (await authStore.logout()) goto(resolve('login'));
 	}
 
 	function goBack() {
-		goto(resolve('/browse'));
+		goto(resolve('browse'));
 	}
 
 	function handleSearchInput(query: string) {
@@ -612,33 +598,35 @@
 								</div>
 							{/if}
 
-							<WallpaperSettings
-								rowClass={settingRowClass}
-								showHiddenFiles={settings.showHiddenFiles}
-								showWallpaperRow={matchesSearch(
-									'background image',
-									'wallpaper',
-									'custom background',
-									'personalization'
-								)}
-								showDisplayModeRow={matchesSearch(
-									'wallpaper fit',
-									'crop',
-									'stretch',
-									'fit',
-									'center',
-									'tile'
-								)}
-								showFrostedRow={matchesSearch(
-									'frosted glass',
-									'blur',
-									'background blur',
-									'glass look'
-								)}
-								bind:backgroundImage={settings.backgroundImage}
-								bind:backgroundImageMode={settings.backgroundImageMode}
-								bind:frostedGlass={settings.frostedGlass}
-							/>
+							{#await import('#lib/components/settings/wallpaper/WallpaperSettings.svelte') then { default: WallpaperSettings }}
+								<WallpaperSettings
+									rowClass={settingRowClass}
+									showHiddenFiles={settings.showHiddenFiles}
+									showWallpaperRow={matchesSearch(
+										'background image',
+										'wallpaper',
+										'custom background',
+										'personalization'
+									)}
+									showDisplayModeRow={matchesSearch(
+										'wallpaper fit',
+										'crop',
+										'stretch',
+										'fit',
+										'center',
+										'tile'
+									)}
+									showFrostedRow={matchesSearch(
+										'frosted glass',
+										'blur',
+										'background blur',
+										'glass look'
+									)}
+									bind:backgroundImage={settings.backgroundImage}
+									bind:backgroundImageMode={settings.backgroundImageMode}
+									bind:frostedGlass={settings.frostedGlass}
+								/>
+							{/await}
 						</div>
 					</section>
 				{/if}
@@ -742,7 +730,9 @@
 								</h2>
 							</div>
 						</div>
-						<ShareLinksSettings />
+						{#await import('#lib/components/settings/ShareLinksSettings.svelte') then { default: ShareLinksSettings }}
+							<ShareLinksSettings />
+						{/await}
 					</section>
 				{/if}
 

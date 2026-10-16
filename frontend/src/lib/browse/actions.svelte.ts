@@ -7,13 +7,13 @@ import {
 	getDownloadUrl,
 	rename,
 	type FileInfo
-} from '$lib/api/files';
-import { createCopyJob, createDeleteJob, createMoveJob } from '$lib/api/jobs';
-import { clipboardStore } from '$lib/stores/clipboard.svelte';
-import { jobsStore } from '$lib/stores/jobs.svelte';
-import { settingsStore } from '$lib/stores/settings.svelte';
-import { toastStore } from '$lib/stores/toast.svelte';
-import { canPreview, getFileTypeDescription } from '$lib/utils/fileTypes';
+} from '#lib/api/files.js';
+import { createCopyJob, createDeleteJob, createMoveJob } from '#lib/api/jobs.js';
+import { clipboardStore } from '#lib/stores/clipboard.svelte.js';
+import { jobsStore } from '#lib/stores/jobs.svelte.js';
+import { settingsStore } from '#lib/stores/settings.svelte.js';
+import { toastStore } from '#lib/stores/toast.svelte.js';
+import { canPreview, getFileTypeDescription } from '#lib/utils/fileTypes.js';
 import type { BrowseData } from './data.svelte';
 import type { BrowseLocation } from './location.svelte';
 import type { BrowseSelection } from './selection.svelte';

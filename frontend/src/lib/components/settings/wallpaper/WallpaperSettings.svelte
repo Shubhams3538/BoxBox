@@ -1,18 +1,18 @@
 <script lang="ts">
 	import { Check, Image as ImageIcon, ScanSearch, Sparkles } from 'lucide-svelte';
-	import { Button, Select, Toggle } from '$lib/components/ui';
+	import { Button, Select, Toggle } from '#lib/components/ui/index.js';
 	import {
 		getBackgroundImageLabel,
 		isValidBackgroundImage,
 		normalizeBackgroundImage
-	} from '$lib/utils/appearance';
+	} from '#lib/utils/appearance.js';
 	import {
 		DEFAULT_BACKGROUND_IMAGE_MODE,
 		WALLPAPER_DISPLAY_OPTIONS,
 		normalizeBackgroundImageMode,
 		type BackgroundImageMode
-	} from '$lib/utils/wallpaper';
-	import LoadError from '$lib/components/LoadError.svelte';
+	} from '#lib/utils/wallpaper.js';
+	import LoadError from '#lib/components/LoadError.svelte';
 
 	interface WallpaperSelection {
 		backgroundImage: string;

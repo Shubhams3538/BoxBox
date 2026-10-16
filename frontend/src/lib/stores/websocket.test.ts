@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { CONFIG } from '$lib/config';
+import { CONFIG } from '#lib/config.js';
 import { jobsStore } from './jobs.svelte';
 import { connectFromEffect, flushSync, websocketStore } from './websocket.test.svelte';
 

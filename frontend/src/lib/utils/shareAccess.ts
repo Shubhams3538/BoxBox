@@ -1,4 +1,4 @@
-import type { SharePermissions } from '$lib/api/shares';
+import type { SharePermissions } from '#lib/api/shares.js';
 
 export function getShareAccessLabel(permissions: SharePermissions): string {
 	if (!permissions.upload) return 'View only';

@@ -1,7 +1,7 @@
 /**
  * The signed-in username, read from the access token's `username` claim.
  */
-import { getAccessToken } from '$lib/api/client';
+import { getAccessToken } from '#lib/api/client.js';
 
 export function currentUsername(): string | null {
 	const token = getAccessToken();

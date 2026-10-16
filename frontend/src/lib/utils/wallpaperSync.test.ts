@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { setAccessToken } from '$lib/api/client';
-import { authStore } from '$lib/stores/auth.svelte';
-import { settingsStore } from '$lib/stores/settings.svelte';
+import { setAccessToken } from '#lib/api/client.js';
+import { authStore } from '#lib/stores/auth.svelte.js';
+import { settingsStore } from '#lib/stores/settings.svelte.js';
 import {
 	publishShareWallpaper,
 	resetShareWallpaperLoginSync,

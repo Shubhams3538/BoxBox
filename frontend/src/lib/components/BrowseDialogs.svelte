@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { FileInfo } from '$lib/api/files';
-	import { formatFileDate, formatFileSize } from '$lib/utils/format';
-	import { Button, Input, Modal } from '$lib/components/ui';
+	import type { FileInfo } from '#lib/api/files.js';
+	import { formatFileDate, formatFileSize } from '#lib/utils/format.js';
+	import { Button, Input, Modal } from '#lib/components/ui/index.js';
 
 	type CreateDialog = { open: boolean; type: 'file' | 'directory'; name: string };
 	type RenameDialog = { open: boolean; newName: string };

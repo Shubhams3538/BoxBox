@@ -1,4 +1,4 @@
-import type { ListOptions } from '$lib/api/files';
+import type { ListOptions } from '#lib/api/files.js';
 
 /** Stable query keys shared by browse mutations and directory queries. */
 export const fileQueryKeys = {

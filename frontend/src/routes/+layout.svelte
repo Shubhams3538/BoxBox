@@ -1,27 +1,30 @@
 <script lang="ts">
 	import './layout.css';
-	import { authStore } from '$lib/stores/auth.svelte';
+	import { authStore } from '#lib/stores/auth.svelte.js';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
-	import { CONFIG } from '$lib/config';
-	import { Spinner, Button } from '$lib/components/ui';
+	import { CONFIG } from '#lib/config.js';
+	import { Spinner, Button } from '#lib/components/ui/index.js';
 	import { AlertTriangle, X } from 'lucide-svelte';
-	import { AuthRefreshEvent } from '$lib/api/client';
-	import { jobsStore } from '$lib/stores/jobs.svelte';
-	import { refreshFilesWhenJobsFinish } from '$lib/stores/refreshFilesOnJobs';
-	import { websocketStore } from '$lib/stores/websocket.svelte';
-	import { settingsStore } from '$lib/stores/settings.svelte';
-	import { shareWallpaperStore } from '$lib/stores/shareWallpaper.svelte';
+	import { AuthRefreshEvent } from '#lib/api/client.js';
+	import { jobsStore } from '#lib/stores/jobs.svelte.js';
+	import { refreshFilesWhenJobsFinish } from '#lib/stores/refreshFilesOnJobs.js';
+	import { websocketStore } from '#lib/stores/websocket.svelte.js';
+	import { settingsStore } from '#lib/stores/settings.svelte.js';
+	import { shareWallpaperStore } from '#lib/stores/shareWallpaper.svelte.js';
 	import {
 		applyAccentColor,
 		resolveBackgroundImage,
 		resolveBackgroundImageUrl
-	} from '$lib/utils/appearance';
-	import { getWallpaperBackgroundStyle, normalizeBackgroundImageMode } from '$lib/utils/wallpaper';
-	import { syncShareWallpaperOnLogin } from '$lib/utils/wallpaperSync';
+	} from '#lib/utils/appearance.js';
+	import {
+		getWallpaperBackgroundStyle,
+		normalizeBackgroundImageMode
+	} from '#lib/utils/wallpaper.js';
+	import { syncShareWallpaperOnLogin } from '#lib/utils/wallpaperSync.js';
 
 	let { children } = $props();
 	let initialized = $state(false);
@@ -50,21 +53,26 @@
 	// Share pages show the share owner's wallpaper, never the visitor's own.
 	const isSharePage = $derived(page.url.pathname.startsWith('/s/'));
 	let ownBackgroundImage = $state<string | null>(null);
+
 	const backgroundImageMode = $derived(
 		normalizeBackgroundImageMode(
 			isSharePage ? shareWallpaperStore.current?.mode : settingsStore.current.backgroundImageMode
 		)
 	);
+
 	const backgroundImage = $derived(
 		isSharePage ? (shareWallpaperStore.current?.url ?? null) : ownBackgroundImage
 	);
+
 	const hasBackgroundImage = $derived(backgroundImage !== null);
+
 	const frostedGlass = $derived(
 		hasBackgroundImage &&
 			(isSharePage
 				? (shareWallpaperStore.current?.frostedGlass ?? false)
 				: settingsStore.current.frostedGlass)
 	);
+
 	const backgroundImageStyle = $derived(
 		backgroundImage ? `url(${JSON.stringify(backgroundImage)})` : undefined
 	);
@@ -92,9 +100,9 @@
 		const currentPath = page.url.pathname;
 
 		if (!authStore.isAuthenticated && !isPublicRoute) {
-			goto(resolve('/login'));
+			goto(resolve('login'));
 		} else if (authStore.isAuthenticated && currentPath.startsWith('/login')) {
-			goto(resolve('/browse'));
+			goto(resolve('browse'));
 		}
 	});
 
@@ -166,7 +174,7 @@
 	}
 
 	async function handleLogout() {
-		if (await authStore.logout()) goto(resolve('/login'));
+		if (await authStore.logout()) goto(resolve('login'));
 	}
 </script>
 
@@ -203,7 +211,7 @@
 						>
 							<div class="mx-auto flex h-14 max-w-[1400px] items-center justify-between">
 								<a
-									href={resolve('/browse')}
+									href={resolve('browse')}
 									class="flex items-center gap-2 text-lg font-semibold text-text-primary no-underline hover:text-accent"
 								>
 									<img src="/logo-boxbox-3d.svg" alt="BoxBox" class="h-9 w-auto" />

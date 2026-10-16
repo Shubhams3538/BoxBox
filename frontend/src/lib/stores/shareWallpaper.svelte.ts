@@ -2,7 +2,7 @@
  * The share owner's wallpaper. Share pages set it so the root layout draws the
  * owner's wallpaper instead of the visitor's own.
  */
-import type { BackgroundImageMode } from '$lib/utils/wallpaper';
+import type { BackgroundImageMode } from '#lib/utils/wallpaper.js';
 
 export interface ShareWallpaper {
 	url: string;

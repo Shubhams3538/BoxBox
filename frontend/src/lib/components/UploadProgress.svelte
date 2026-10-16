@@ -4,10 +4,10 @@
 	 * Displays progress bars with icon that transforms to X on hover
 	 */
 
-	import type { UploadProgress as UploadProgressType } from '$lib/utils/upload';
-	import { formatFileSize, formatPercentage } from '$lib/utils/format';
+	import type { UploadProgress as UploadProgressType } from '#lib/utils/upload.js';
+	import { formatFileSize, formatPercentage } from '#lib/utils/format.js';
 	import { X, Upload } from 'lucide-svelte';
-	import { Badge, Button, ProgressBar } from '$lib/components/ui';
+	import { Badge, Button, ProgressBar } from '#lib/components/ui/index.js';
 
 	interface Props {
 		uploads: UploadProgressType[];

@@ -1,27 +1,26 @@
 <script lang="ts">
 	/**
-	 * Browse page - the file browser. The logic lives in `$lib/browse`; this page wires it to the UI.
+	 * Browse page - the file browser. The logic lives in `#lib/browse`; this page wires it to the UI.
 	 */
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import Sidebar from '$lib/components/Sidebar.svelte';
-	import Toolbar from '$lib/components/Toolbar.svelte';
-	import FileList from '$lib/components/FileList.svelte';
-	import FileGrid from '$lib/components/FileGrid.svelte';
-	import StatusBar from '$lib/components/StatusBar.svelte';
-	import DriveCard from '$lib/components/DriveCard.svelte';
-	import LoadError from '$lib/components/LoadError.svelte';
-	import Toast from '$lib/components/ui/Toast.svelte';
-	import { Spinner } from '$lib/components/ui';
-	import { settingsStore } from '$lib/stores/settings.svelte';
-	import { uploadStore } from '$lib/stores/upload.svelte';
-	import { useBrowseActions } from '$lib/browse/actions.svelte';
-	import { useBrowseData } from '$lib/browse/data.svelte';
-	import { useBrowseLocation } from '$lib/browse/location.svelte';
-	import { useBrowseSelection } from '$lib/browse/selection.svelte';
-	import { useBrowseUploads } from '$lib/browse/uploads.svelte';
-	import { CONFIG } from '$lib/config';
-	import { createHoverIntent } from '$lib/utils/hoverIntent';
+	import Sidebar from '#lib/components/Sidebar.svelte';
+	import Toolbar from '#lib/components/Toolbar.svelte';
+	import FileList from '#lib/components/FileList.svelte';
+	import StatusBar from '#lib/components/StatusBar.svelte';
+	import DriveCard from '#lib/components/DriveCard.svelte';
+	import LoadError from '#lib/components/LoadError.svelte';
+	import Toast from '#lib/components/ui/Toast.svelte';
+	import { Spinner } from '#lib/components/ui/index.js';
+	import { settingsStore } from '#lib/stores/settings.svelte.js';
+	import { uploadStore } from '#lib/stores/upload.svelte.js';
+	import { useBrowseActions } from '#lib/browse/actions.svelte.js';
+	import { useBrowseData } from '#lib/browse/data.svelte.js';
+	import { useBrowseLocation } from '#lib/browse/location.svelte.js';
+	import { useBrowseSelection } from '#lib/browse/selection.svelte.js';
+	import { useBrowseUploads } from '#lib/browse/uploads.svelte.js';
+	import { CONFIG } from '#lib/config.js';
+	import { createHoverIntent } from '#lib/utils/hoverIntent.js';
 
 	const selection = useBrowseSelection();
 	const location = useBrowseLocation({ onLocationChange: () => selection.clear() });
@@ -82,7 +81,7 @@
 			onUp={location.up}
 			onNavigate={location.navigate}
 			onRefresh={data.reload}
-			onSettings={() => goto(resolve('/settings'))}
+			onSettings={() => goto(resolve('settings'))}
 			onUpload={uploads.openPicker}
 			onUploadFolder={uploads.openFolderPicker}
 			uploadDisabled={data.uploadDisabled}
@@ -133,23 +132,25 @@
 					{/if}
 				</div>
 			{:else if location.viewMode === 'grid'}
-				<FileGrid
-					items={data.displayItems}
-					emptyMessage={data.emptyListMessage}
-					selectedPaths={selection.paths}
-					isLoading={data.isFileListLoading}
-					compactMode={settings.compactMode}
-					cutPaths={actions.cutPaths}
-					favoritePaths={actions.favoritePaths}
-					canPaste={actions.canPaste}
-					canCreate={data.canCreate}
-					showFileExtensions={settings.showFileExtensions}
-					previewOnSingleClick={settings.previewOnSingleClick}
-					onItemClick={actions.openFile}
-					{onFolderHover}
-					onSelectionChange={selection.set}
-					onContextMenuAction={actions.handleContextMenuAction}
-				/>
+				{#await import('#lib/components/FileGrid.svelte') then { default: FileGrid }}
+					<FileGrid
+						items={data.displayItems}
+						emptyMessage={data.emptyListMessage}
+						selectedPaths={selection.paths}
+						isLoading={data.isFileListLoading}
+						compactMode={settings.compactMode}
+						cutPaths={actions.cutPaths}
+						favoritePaths={actions.favoritePaths}
+						canPaste={actions.canPaste}
+						canCreate={data.canCreate}
+						showFileExtensions={settings.showFileExtensions}
+						previewOnSingleClick={settings.previewOnSingleClick}
+						onItemClick={actions.openFile}
+						{onFolderHover}
+						onSelectionChange={selection.set}
+						onContextMenuAction={actions.handleContextMenuAction}
+					/>
+				{/await}
 			{:else}
 				<FileList
 					items={data.displayItems}
@@ -189,7 +190,7 @@
 </div>
 
 {#if actions.previewFile}
-	{#await import('$lib/components/FilePreview.svelte') then { default: FilePreview }}
+	{#await import('#lib/components/FilePreview.svelte') then { default: FilePreview }}
 		<FilePreview
 			file={actions.previewFile}
 			allFiles={data.previewableFiles}
@@ -203,7 +204,7 @@
 {/if}
 
 {#if hasOpenDialog}
-	{#await import('$lib/components/BrowseDialogs.svelte') then { default: BrowseDialogs }}
+	{#await import('#lib/components/BrowseDialogs.svelte') then { default: BrowseDialogs }}
 		<BrowseDialogs
 			createDialog={actions.createDialog}
 			renameDialog={actions.renameDialog}
@@ -225,7 +226,7 @@
 {/if}
 
 {#if actions.shareItem}
-	{#await import('$lib/components/ShareModal.svelte') then { default: ShareModal }}
+	{#await import('#lib/components/ShareModal.svelte') then { default: ShareModal }}
 		<ShareModal open item={actions.shareItem} onclose={actions.closeShare} />
 	{:catch}
 		<LoadError label="share window" onClose={actions.closeShare} />
@@ -250,7 +251,7 @@
 
 <!-- Upload Panel (floating bottom-right) -->
 {#if uploadStore.uploads.length > 0}
-	{#await import('$lib/components/UploadPanel.svelte') then { default: UploadPanel }}
+	{#await import('#lib/components/UploadPanel.svelte') then { default: UploadPanel }}
 		<UploadPanel />
 	{:catch}
 		{#if !uploadErrorDismissed}

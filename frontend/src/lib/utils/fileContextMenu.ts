@@ -3,8 +3,8 @@
  * Centralized definition of context menu items for file operations
  */
 
-import type { ContextMenuItem } from '$lib/components/ui/ContextMenu.svelte';
-import type { FileInfo } from '$lib/api/files';
+import type { ContextMenuItem } from '#lib/components/ui/ContextMenu.svelte';
+import type { FileInfo } from '#lib/api/files.js';
 import {
 	Copy,
 	Scissors,

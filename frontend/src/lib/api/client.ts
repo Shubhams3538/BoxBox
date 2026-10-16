@@ -2,7 +2,7 @@
  * HTTP client wrapper with JWT token injection and refresh handling
  */
 
-import { tokenStorage } from '$lib/utils/storage';
+import { tokenStorage } from '#lib/utils/storage.js';
 
 // API base URL - can be configured via environment variable
 const API_BASE_URL = '/api/v1';

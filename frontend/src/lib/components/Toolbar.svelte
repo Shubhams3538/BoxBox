@@ -11,8 +11,8 @@
 		Settings,
 		Upload
 	} from 'lucide-svelte';
-	import EditablePathBar from '$lib/components/EditablePathBar.svelte';
-	import SearchBar from '$lib/components/SearchBar.svelte';
+	import EditablePathBar from '#lib/components/EditablePathBar.svelte';
+	import SearchBar from '#lib/components/SearchBar.svelte';
 
 	interface Props {
 		pathSegments?: string[];

@@ -3,9 +3,9 @@
  */
 
 import { untrack } from 'svelte';
-import { getAccessToken } from '$lib/api/client';
-import { parseServerMessage, type WSServerMessage } from '$lib/api/websocket';
-import { CONFIG } from '$lib/config';
+import { getAccessToken } from '#lib/api/client.js';
+import { parseServerMessage, type WSServerMessage } from '#lib/api/websocket.js';
+import { CONFIG } from '#lib/config.js';
 import { jobsStore } from './jobs.svelte';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { DriveStats } from '$lib/api/files';
+	import type { DriveStats } from '#lib/api/files.js';
 	import { HardDrive, Pencil, X } from 'lucide-svelte';
-	import { formatFileSize } from '$lib/utils/format';
-	import { Badge, ProgressBar, ContextMenu, InlineRename } from '$lib/components/ui';
-	import { settingsStore } from '$lib/stores/settings.svelte';
+	import { formatFileSize } from '#lib/utils/format.js';
+	import { Badge, ProgressBar, ContextMenu, InlineRename } from '#lib/components/ui/index.js';
+	import { settingsStore } from '#lib/stores/settings.svelte.js';
 
 	interface Props {
 		drive: DriveStats;

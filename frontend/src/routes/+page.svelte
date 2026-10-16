@@ -4,10 +4,10 @@
 	 */
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { Spinner } from '$lib/components/ui';
+	import { Spinner } from '#lib/components/ui/index.js';
 
 	onMount(() => {
-		goto('/browse', { replaceState: true });
+		goto('/browse', { replace: true });
 	});
 </script>
 

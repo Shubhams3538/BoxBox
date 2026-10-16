@@ -3,7 +3,7 @@
 	 * SearchBar component with search input and loading state
 	 */
 	import { Search, X } from 'lucide-svelte';
-	import { Spinner } from '$lib/components/ui';
+	import { Spinner } from '#lib/components/ui/index.js';
 
 	interface Props {
 		value?: string;

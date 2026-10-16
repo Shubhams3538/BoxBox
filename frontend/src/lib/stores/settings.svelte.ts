@@ -2,19 +2,22 @@
  * User preferences, kept in localStorage; drive names are also stored on the server
  */
 
-import { settingsStorage } from '$lib/utils/storage';
+import { settingsStorage } from '#lib/utils/storage.js';
 import {
 	getDriveNames,
 	setDriveName as apiSetDriveName,
 	deleteDriveName as apiDeleteDriveName
-} from '$lib/api/drive-names';
-import { normalizeBackgroundImage } from '$lib/utils/appearance';
+} from '#lib/api/drive-names.js';
+import { normalizeBackgroundImage } from '#lib/utils/appearance.js';
 import {
 	DEFAULT_BACKGROUND_IMAGE_MODE,
 	normalizeBackgroundImageMode,
 	type BackgroundImageMode
-} from '$lib/utils/wallpaper';
-import { isInlineWallpaperDataUrl, saveLocalWallpaperDataUrl } from '$lib/utils/wallpaperStorage';
+} from '#lib/utils/wallpaper.js';
+import {
+	isInlineWallpaperDataUrl,
+	saveLocalWallpaperDataUrl
+} from '#lib/utils/wallpaperStorage.js';
 
 export interface UserSettings {
 	showHiddenFiles: boolean;

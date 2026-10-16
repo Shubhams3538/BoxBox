@@ -7,7 +7,7 @@ import {
 	createDeleteJob,
 	type Job,
 	type JobState
-} from '$lib/api/jobs';
+} from '#lib/api/jobs.js';
 import { fileQueryKeys } from './files';
 import { jobsStore } from './jobs.svelte';
 import { refreshFilesWhenJobsFinish } from './refreshFilesOnJobs';
