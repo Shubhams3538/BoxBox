@@ -50,6 +50,7 @@ export function useBrowseLocation(options: { onLocationChange: () => void }) {
 		updates: Record<string, string | null>,
 		{ replaceState = false }: { replaceState?: boolean } = {}
 	) {
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Only the navigation target string escapes this handler.
 		const url = new URL(page.url.href);
 		for (const [key, value] of Object.entries(updates)) {
 			if (value) url.searchParams.set(key, value);
