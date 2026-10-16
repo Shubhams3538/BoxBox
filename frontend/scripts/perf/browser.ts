@@ -8,6 +8,7 @@ import { browserViolations, median, type BrowserMetrics } from './gates';
 import { baseArgument, repo, results, run, withBaseline } from './common';
 import { createDirectoryFixture, startServer } from './server';
 import { verifyNavigation } from './navigation';
+import { verifyLazyLoadErrors } from './lazy-load-errors';
 
 const profiles = [
 	{ name: 'local', latency: 0, downloadThroughput: -1, uploadThroughput: -1 },
@@ -214,6 +215,7 @@ async function benchmark(base?: string, sha?: string) {
 			}
 		}
 		await loggedOut(browser, head.url);
+		await verifyLazyLoadErrors(browser, head.url, head.credentials);
 		await verifyNavigation(browser, head.url, head.credentials, fixture.mount);
 	} finally {
 		writeFileSync(

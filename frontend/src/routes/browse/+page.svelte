@@ -150,6 +150,8 @@
 						onSelectionChange={selection.set}
 						onContextMenuAction={actions.handleContextMenuAction}
 					/>
+				{:catch}
+					<LoadError label="grid view" inline />
 				{/await}
 			{:else}
 				<FileList

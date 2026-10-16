@@ -15,6 +15,7 @@
 		normalizeAccentColor
 	} from '#lib/utils/appearance.js';
 	import SearchBar from '#lib/components/SearchBar.svelte';
+	import LoadError from '#lib/components/LoadError.svelte';
 	import { Button, ProgressButton, Select, Toggle } from '#lib/components/ui/index.js';
 	import { normalizeBackgroundImageMode } from '#lib/utils/wallpaper.js';
 	import { publishShareWallpaper } from '#lib/utils/wallpaperSync.js';
@@ -626,6 +627,8 @@
 									bind:backgroundImageMode={settings.backgroundImageMode}
 									bind:frostedGlass={settings.frostedGlass}
 								/>
+							{:catch}
+								<LoadError label="wallpaper settings" inline />
 							{/await}
 						</div>
 					</section>
@@ -732,6 +735,8 @@
 						</div>
 						{#await import('#lib/components/settings/ShareLinksSettings.svelte') then { default: ShareLinksSettings }}
 							<ShareLinksSettings />
+						{:catch}
+							<LoadError label="shared links" inline />
 						{/await}
 					</section>
 				{/if}

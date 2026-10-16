@@ -1,4 +1,3 @@
-import { SvelteURL } from 'svelte/reactivity';
 import { afterNavigate, goto } from '$app/navigation';
 import { resolve } from '$app/paths';
 import { page } from '$app/state';
@@ -51,7 +50,7 @@ export function useBrowseLocation(options: { onLocationChange: () => void }) {
 		updates: Record<string, string | null>,
 		{ replaceState = false }: { replaceState?: boolean } = {}
 	) {
-		const url = new SvelteURL(page.url.href);
+		const url = new URL(page.url.href);
 		for (const [key, value] of Object.entries(updates)) {
 			if (value) url.searchParams.set(key, value);
 			else url.searchParams.delete(key);
