@@ -351,6 +351,15 @@ describe('restoreSession', () => {
 		assert.deepEqual(requests, []);
 	});
 
+	test('a superseded shell refresh falls back to the current shared cookie', async () => {
+		const { win } = runShell({
+			refresh: () => Response.json({ code: 'REFRESH_SUPERSEDED' }, { status: 409 })
+		});
+		assert.equal((await restoreSession(createEarlyStart(() => win))).accessToken, 'app-token');
+		assert.equal(requests.length, 1);
+		assert.match(requests[0], /\/auth\/refresh$/);
+	});
+
 	test('refreshes by itself when the shell started nothing or its refresh failed', async () => {
 		const failed = runShell({ refresh: () => new Response('no', { status: 503 }) });
 		assert.equal(

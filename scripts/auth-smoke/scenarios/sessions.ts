@@ -6,6 +6,7 @@ import {
   cookieValue,
   expectCookieCleared,
   expectRefreshRejected,
+  expectRefreshSuperseded,
   login,
   logout,
   protectedFiles,
@@ -78,7 +79,7 @@ export async function checkSessions(context: SmokeContext, server: Subprocess) {
     (response) => response.status === 200,
   );
   const losers = concurrentRefreshes.filter(
-    (response) => response.status === 401,
+    (response) => response.status === 409,
   );
   expect(winners.length === 1, "concurrent refresh did not have one winner");
   expect(losers.length === 1, "concurrent refresh did not reject one replay");
@@ -86,7 +87,10 @@ export async function checkSessions(context: SmokeContext, server: Subprocess) {
   const loserResponse = losers[0];
   expect(winnerResponse !== undefined, "concurrent refresh winner was missing");
   expect(loserResponse !== undefined, "concurrent refresh replay was missing");
-  expectCookieCleared(loserResponse, "concurrent refresh replay");
+  expect(
+    !loserResponse.headers.has("Set-Cookie"),
+    "concurrent refresh replay changed the shared cookie",
+  );
   await loserResponse.arrayBuffer();
   const replayWinner = {
     accessToken: await responseAccessToken(
@@ -108,7 +112,7 @@ export async function checkSessions(context: SmokeContext, server: Subprocess) {
     200,
     "winner replacement access",
   );
-  await expectRefreshRejected(
+  await expectRefreshSuperseded(
     baseUrl,
     replayInitial.refreshToken,
     "losing concurrent refresh replay",
@@ -126,12 +130,12 @@ export async function checkSessions(context: SmokeContext, server: Subprocess) {
     "winner access after replay",
   );
 
-  await expectRefreshRejected(
+  await expectRefreshSuperseded(
     baseUrl,
     logoutInitial.refreshToken,
     "first rotated refresh before logout",
   );
-  await expectRefreshRejected(
+  await expectRefreshSuperseded(
     baseUrl,
     logoutRotated.refreshToken,
     "second rotated refresh before logout",
@@ -211,7 +215,7 @@ export async function checkSessions(context: SmokeContext, server: Subprocess) {
       `${label} access after restart`,
     );
   }
-  await expectRefreshRejected(
+  await expectRefreshSuperseded(
     baseUrl,
     replayInitial.refreshToken,
     "old concurrent refresh after restart",
@@ -329,7 +333,7 @@ export async function checkSessions(context: SmokeContext, server: Subprocess) {
     scenario: "Refresh replay and private transports",
     outcome: "PASS",
     evidence:
-      "Two concurrent uses of one refresh token produced one HTTP 200 winner and one HTTP 401 replay; the winning session refreshed before and after restart. Active stream header/query returned exact marker bytes, active WebSocket header/query returned 101, and removed-session stream/WebSocket header/query returned 401.",
+      "Two concurrent uses of one refresh token produced one HTTP 200 winner and one HTTP 409 replay without Set-Cookie; the winning session refreshed before and after restart. Active stream header/query returned exact marker bytes, active WebSocket header/query returned 101, and removed-session stream/WebSocket header/query returned 401.",
   });
   return { server, activeAfterRestart };
 }

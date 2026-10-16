@@ -55,6 +55,7 @@ var serviceErrorMappings = []ErrorMapping{
 	{service.ErrInvalidWallpaper, "Wallpaper must be a JPEG, PNG, GIF, or WebP image up to 20 MB with a valid display mode", model.ErrCodeValidationError, http.StatusBadRequest},
 
 	// Auth service errors
+	{service.ErrRefreshSuperseded, "Another request refreshed this session. Retry with the current cookie.", model.ErrCodeRefreshSuperseded, http.StatusConflict},
 	{service.ErrInvalidCredentials, "Invalid credentials", model.ErrCodeUnauthorized, http.StatusUnauthorized},
 	{service.ErrInvalidToken, "Invalid token", model.ErrCodeTokenInvalid, http.StatusUnauthorized},
 	{service.ErrTokenExpired, "Token has expired", model.ErrCodeTokenInvalid, http.StatusUnauthorized},

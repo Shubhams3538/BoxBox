@@ -108,6 +108,10 @@ jobs:
         working-directory: frontend
         run: bunx playwright install --with-deps chromium
 
+      - name: Check shared-cookie session recovery
+        working-directory: frontend
+        run: bun scripts/auth-session-browser.ts
+
       - name: Guard real browser cold and warm folder loads
         working-directory: frontend
         env:

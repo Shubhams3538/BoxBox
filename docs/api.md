@@ -62,6 +62,8 @@ POST /api/v1/auth/logout
 
 The request has no body. Logout needs a valid current refresh cookie. It does not need an access-token header. Logout removes the entire session, so all access tokens issued by that session stop working, including tokens from earlier refresh rotations. Other logins for the same account remain active. A missing or invalid refresh cookie returns `401 TOKEN_INVALID` and clears the cookie.
 
+A still-unexpired refresh token that another request has replaced returns `409 REFRESH_SUPERSEDED` from refresh or logout. The response contains no token pair and no `Set-Cookie` header, preserving the replacement cookie shared by browser tabs. Retry with the current cookie. A repeated conflict is retryable, not proof that the session has ended.
+
 Login, refresh, and logout save session state before reporting success. Publication occurs at the file rename. Success requires syncing and closing the file, renaming it, and syncing the parent directory. Before rename, a failed write returns `500 INTERNAL_ERROR` without publishing a token pair or a `Set-Cookie` header. Refresh and logout preserve the existing cookie so the client can retry. Login does not clear an unrelated cookie.
 
 If a durability step fails after rename, the server keeps the installed in-memory state and returns `401 SESSION_RECOVERY_REQUIRED` without a token pair. Refresh and logout clear the cookie. Login sends no new cookie and does not clear an unrelated existing cookie. Sign in again after this error. Logout did not report success.

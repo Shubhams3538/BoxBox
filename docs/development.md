@@ -172,6 +172,10 @@ Omit `--base` for a browser-only candidate check. In stacked PRs CI compares aga
 
 CI uploads raw samples, benchmark summaries, browser byte/request counts and failure diagnostics as 14-day artifacts, even when a gate fails. Local results are ignored under `perf-results/`. No automatic review requests, budget resets or baseline commits are performed.
 
+## Check concurrent browser refresh
+
+From `frontend/`, run `bun scripts/auth-session-browser.ts` with Playwright Chromium installed. This builds the real API client and Go server, sends overlapping refreshes from two pages sharing one cookie jar, and delivers the stale response after the replacement cookie. Both pages must recover without losing their cookie. It also verifies that explicit logout still ends the other page's session.
+
 ## Check active-session authentication
 
 On Linux, run the production-mode auth smoke check from the repository root:
