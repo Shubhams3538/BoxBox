@@ -6,7 +6,7 @@ import { createEarlyStart } from './earlyStart';
 import { restoreSession } from './auth';
 import { ApiRequestError } from './client';
 import { directoryUrl, type FileList } from './files';
-import { tokenStorage } from '$lib/utils/storage';
+import { tokenStorage } from '#lib/utils/storage.js';
 
 const script = readFileSync(new URL('../../../static/early-fetch.js', import.meta.url), 'utf8');
 const origin = 'http://localhost';

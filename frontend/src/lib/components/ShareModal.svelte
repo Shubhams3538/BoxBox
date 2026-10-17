@@ -2,15 +2,15 @@
 	/**
 	 * ShareModal - list an item's share links and create new ones. Folders also choose recipient access.
 	 */
-	import { Button, Modal, Select, Spinner } from '$lib/components/ui';
-	import ShareLinkList from '$lib/components/ShareLinkList.svelte';
+	import { Button, Modal, Select, Spinner } from '#lib/components/ui/index.js';
+	import ShareLinkList from '#lib/components/ShareLinkList.svelte';
 	import {
 		createShare,
 		listShares,
 		type FileInfo,
 		type SharePermissionInput,
 		type ShareRecord
-	} from '$lib/api';
+	} from '#lib/api/index.js';
 
 	interface Props {
 		open?: boolean;

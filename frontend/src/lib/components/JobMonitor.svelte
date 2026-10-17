@@ -4,11 +4,11 @@
 	 * Displays progress, status, and cancel option
 	 */
 
-	import type { Job } from '$lib/api/jobs';
-	import { isJobActive, isJobTerminal } from '$lib/api/jobs';
-	import { formatPercentage, formatFileDate } from '$lib/utils/format';
+	import type { Job } from '#lib/api/jobs.js';
+	import { isJobActive, isJobTerminal } from '#lib/api/jobs.js';
+	import { formatPercentage, formatFileDate } from '#lib/utils/format.js';
 	import { X, Copy, FolderInput, Trash2, Settings } from 'lucide-svelte';
-	import { Badge, ProgressBar, Button } from '$lib/components/ui';
+	import { Badge, ProgressBar, Button } from '#lib/components/ui/index.js';
 
 	interface Props {
 		jobs: Job[];

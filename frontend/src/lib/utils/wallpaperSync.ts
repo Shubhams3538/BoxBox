@@ -8,17 +8,17 @@ import {
 	getWallpaper,
 	updateWallpaperDisplay,
 	uploadWallpaper
-} from '$lib/api/wallpaper';
-import { settingsStore } from '$lib/stores/settings.svelte';
-import { resolveBackgroundImageUrl } from '$lib/utils/appearance';
-import { currentUsername } from '$lib/utils/sessionUser';
-import { normalizeBackgroundImageMode } from '$lib/utils/wallpaper';
+} from '#lib/api/wallpaper.js';
+import { settingsStore } from '#lib/stores/settings.svelte.js';
+import { resolveBackgroundImageUrl } from '#lib/utils/appearance.js';
+import { currentUsername } from '#lib/utils/sessionUser.js';
+import { normalizeBackgroundImageMode } from '#lib/utils/wallpaper.js';
 import {
 	dataUrlToBlob,
 	getLocalWallpaperBlob,
 	isInlineWallpaperDataUrl,
 	isLocalWallpaperReference
-} from '$lib/utils/wallpaperStorage';
+} from '#lib/utils/wallpaperStorage.js';
 
 // Browser settings are not per account, so remember whose wallpaper this is.
 const OWNER_KEY = 'boxbox_wallpaper_owner';

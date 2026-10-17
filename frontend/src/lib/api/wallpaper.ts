@@ -3,7 +3,7 @@
  */
 
 import { ApiRequestError, apiRequest } from './client';
-import type { BackgroundImageMode } from '$lib/utils/wallpaper';
+import type { BackgroundImageMode } from '#lib/utils/wallpaper.js';
 
 export interface WallpaperDisplay {
 	mode: BackgroundImageMode;

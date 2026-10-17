@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { SystemDrive } from '$lib/api/system';
+	import type { SystemDrive } from '#lib/api/system.js';
 	import { HardDrive, Database, Pencil, X } from 'lucide-svelte';
-	import { formatFileSize } from '$lib/utils/format';
-	import { Badge, ProgressBar, ContextMenu, InlineRename } from '$lib/components/ui';
-	import { settingsStore } from '$lib/stores/settings.svelte';
+	import { formatFileSize } from '#lib/utils/format.js';
+	import { Badge, ProgressBar, ContextMenu, InlineRename } from '#lib/components/ui/index.js';
+	import { settingsStore } from '#lib/stores/settings.svelte.js';
 
 	interface Props {
 		drive: SystemDrive;

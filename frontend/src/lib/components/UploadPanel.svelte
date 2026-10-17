@@ -3,8 +3,8 @@
 	 * UploadPanel - Google Drive style floating upload panel
 	 * Fixed position bottom-right, minimizable, manually closed
 	 */
-	import { uploadStore } from '$lib/stores/upload.svelte';
-	import UploadProgress from '$lib/components/UploadProgress.svelte';
+	import { uploadStore } from '#lib/stores/upload.svelte.js';
+	import UploadProgress from '#lib/components/UploadProgress.svelte';
 	import { ChevronDown, ChevronUp, X } from 'lucide-svelte';
 	import { slide } from 'svelte/transition';
 

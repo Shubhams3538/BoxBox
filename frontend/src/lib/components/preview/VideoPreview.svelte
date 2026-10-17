@@ -2,8 +2,8 @@
 	/**
 	 * VideoPreview - HTML5 video player with streaming support
 	 */
-	import { Button } from '$lib/components/ui';
-	import { formatFileSize } from '$lib/utils/format';
+	import { Button } from '#lib/components/ui/index.js';
+	import { formatFileSize } from '#lib/utils/format.js';
 	import { Download } from 'lucide-svelte';
 
 	interface Props {

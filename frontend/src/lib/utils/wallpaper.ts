@@ -1,5 +1,5 @@
-import type { FileInfo } from '$lib/api/files';
-import { getPreviewType } from '$lib/utils/fileTypes';
+import type { FileInfo } from '#lib/api/files.js';
+import { getPreviewType } from '#lib/utils/fileTypes.js';
 
 export type BackgroundImageMode = 'cover' | 'contain' | 'stretch' | 'center' | 'tile';
 

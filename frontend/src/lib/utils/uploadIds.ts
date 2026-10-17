@@ -1,4 +1,4 @@
-import { CONFIG } from '$lib/config';
+import { CONFIG } from '#lib/config.js';
 
 /** Kept apart from the transfer code so the upload store can name and size uploads without loading it. */
 export function generateUploadId(): string {

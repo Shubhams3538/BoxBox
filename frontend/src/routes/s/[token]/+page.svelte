@@ -12,7 +12,7 @@
 		Trash2,
 		Upload
 	} from 'lucide-svelte';
-	import { Button, ProgressBar, Spinner, Toast } from '$lib/components/ui';
+	import { Button, ProgressBar, Spinner, Toast } from '#lib/components/ui/index.js';
 	import {
 		ApiRequestError,
 		getShareInfo,
@@ -25,20 +25,20 @@
 		shareWallpaperUrl,
 		type ShareInfoResponse,
 		type ShareItem
-	} from '$lib/api';
-	import { shareWallpaperStore } from '$lib/stores/shareWallpaper.svelte';
-	import { toastStore } from '$lib/stores/toast.svelte';
-	import { getFileIcon, getPreviewType } from '$lib/utils/fileTypes';
-	import { formatFileSize, formatRelativeTime } from '$lib/utils/format';
-	import { getShareAccessLabel } from '$lib/utils/shareAccess';
+	} from '#lib/api/index.js';
+	import { shareWallpaperStore } from '#lib/stores/shareWallpaper.svelte.js';
+	import { toastStore } from '#lib/stores/toast.svelte.js';
+	import { getFileIcon, getPreviewType } from '#lib/utils/fileTypes.js';
+	import { formatFileSize, formatRelativeTime } from '#lib/utils/format.js';
+	import { getShareAccessLabel } from '#lib/utils/shareAccess.js';
 	import {
 		entriesFromDataTransfer,
 		entriesFromFiles,
 		foldersFor,
 		type UploadEntry
-	} from '$lib/utils/uploadEntries';
-	import { loadPreviewComponent } from '$lib/components/preview/registry';
-	import { uploadShareEntries, uploadShareFile } from '$lib/share/uploads';
+	} from '#lib/utils/uploadEntries.js';
+	import { loadPreviewComponent } from '#lib/components/preview/registry.js';
+	import { uploadShareEntries, uploadShareFile } from '#lib/share/uploads.js';
 
 	interface SelectedFile {
 		/** Path inside the shared folder; undefined for a single-file share. */
@@ -98,12 +98,15 @@
 		'flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded border-none bg-transparent text-text-secondary transition-colors duration-100 hover:bg-surface-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50';
 
 	onMount(() => void loadShare());
-	afterNavigate(({ from, to }) => {
+	afterNavigate(({ from, to, shallow, type }) => {
+		if (shallow && type === 'goto') return;
 		if (from && from.route.id === to?.route.id && from.params?.token !== to?.params?.token)
 			void loadShare();
 	});
 
-	beforeNavigate(({ to }) => {
+	beforeNavigate(({ to, shallow, type }) => {
+		if (shallow && type === 'goto') return;
+
 		if (to?.params?.token !== token) {
 			uploadController?.abort();
 			uploadController = undefined;
@@ -318,12 +321,10 @@
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
-
-<svelte:head>
-	<title>{info?.fileName ?? 'Shared'} - BoxBox</title>
-</svelte:head>
+<svelte:head><title>{info?.fileName ?? 'Shared'} - BoxBox</title></svelte:head>
 
 <input bind:this={uploadInput} type="file" multiple class="hidden" onchange={handleUploadChange} />
+
 <input
 	bind:this={folderUploadInput}
 	type="file"

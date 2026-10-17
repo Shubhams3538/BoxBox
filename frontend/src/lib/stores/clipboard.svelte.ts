@@ -3,7 +3,7 @@
  * Requirements: Context menu feature - clipboard state management
  */
 
-import type { FileInfo } from '$lib/api/files';
+import type { FileInfo } from '#lib/api/files.js';
 
 export type ClipboardOperation = 'copy' | 'cut';
 

@@ -3,7 +3,7 @@
  */
 
 import { SvelteMap } from 'svelte/reactivity';
-import { listJobs, isJobActive, isJobTerminal, type Job, type JobUpdate } from '$lib/api/jobs';
+import { listJobs, isJobActive, isJobTerminal, type Job, type JobUpdate } from '#lib/api/jobs.js';
 
 function newestFirst(left: Job, right: Job): number {
 	return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();

@@ -3,9 +3,9 @@
 	 * ShareLinksSettings - every active share link, with copy and revoke.
 	 */
 	import { onMount } from 'svelte';
-	import { Button, Spinner } from '$lib/components/ui';
-	import ShareLinkList from '$lib/components/ShareLinkList.svelte';
-	import { listShares, type ShareRecord } from '$lib/api';
+	import { Button, Spinner } from '#lib/components/ui/index.js';
+	import ShareLinkList from '#lib/components/ShareLinkList.svelte';
+	import { listShares, type ShareRecord } from '#lib/api/index.js';
 
 	let shares = $state<ShareRecord[]>([]);
 	let loading = $state(true);

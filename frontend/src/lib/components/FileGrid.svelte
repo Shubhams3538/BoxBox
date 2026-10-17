@@ -3,16 +3,16 @@
 	 * FileGrid component - icon/thumbnail grid for browsing folders
 	 */
 
-	import type { FileInfo } from '$lib/api/files';
-	import { getThumbnailUrl } from '$lib/api/files';
-	import { formatFileSize, formatFileDate } from '$lib/utils/format';
-	import { getFileTypeDescription, getFileIcon, getPreviewType } from '$lib/utils/fileTypes';
-	import { getFileContextMenuItems } from '$lib/utils/fileContextMenu';
+	import type { FileInfo } from '#lib/api/files.js';
+	import { getThumbnailUrl } from '#lib/api/files.js';
+	import { formatFileSize, formatFileDate } from '#lib/utils/format.js';
+	import { getFileTypeDescription, getFileIcon, getPreviewType } from '#lib/utils/fileTypes.js';
+	import { getFileContextMenuItems } from '#lib/utils/fileContextMenu.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { ContextMenu, Spinner } from '$lib/components/ui';
+	import { ContextMenu, Spinner } from '#lib/components/ui/index.js';
 	import { FolderOpen } from 'lucide-svelte';
-	import { CONFIG } from '$lib/config';
-	import { createDelayedFlag } from '$lib/utils/delayedFlag.svelte';
+	import { CONFIG } from '#lib/config.js';
+	import { createDelayedFlag } from '#lib/utils/delayedFlag.svelte.js';
 
 	let {
 		items = [],

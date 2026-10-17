@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Folder, Home, Loader2 } from 'lucide-svelte';
 	import { onDestroy, tick } from 'svelte';
-	import { listDirectory, listRoots } from '$lib/api/files';
+	import { listDirectory, listRoots } from '#lib/api/files.js';
 
 	interface PathSuggestion {
 		path: string;

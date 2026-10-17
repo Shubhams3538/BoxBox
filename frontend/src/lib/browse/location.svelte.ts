@@ -1,9 +1,8 @@
-import { SvelteURL } from 'svelte/reactivity';
 import { afterNavigate, goto } from '$app/navigation';
 import { resolve } from '$app/paths';
 import { page } from '$app/state';
-import { settingsStore } from '$lib/stores/settings.svelte';
-import type { SortDir, SortField, ViewMode } from '$lib/types/files';
+import { settingsStore } from '#lib/stores/settings.svelte.js';
+import type { SortDir, SortField, ViewMode } from '#lib/types/files.js';
 
 function parseSortField(value: string | null): SortField {
 	if (value === 'name' || value === 'size' || value === 'modTime' || value === 'type') return value;
@@ -51,18 +50,18 @@ export function useBrowseLocation(options: { onLocationChange: () => void }) {
 		updates: Record<string, string | null>,
 		{ replaceState = false }: { replaceState?: boolean } = {}
 	) {
-		const url = new SvelteURL(page.url);
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Only the navigation target string escapes this handler.
+		const url = new URL(page.url.href);
 		for (const [key, value] of Object.entries(updates)) {
 			if (value) url.searchParams.set(key, value);
 			else url.searchParams.delete(key);
 		}
-		const target = `${resolve('/browse')}${url.search}${url.hash}`;
+		const target = `${resolve('browse')}${url.search}${url.hash}`;
 
 		if (replaceState) {
 			void goto(target, {
-				replaceState: true,
-				noScroll: true,
-				keepFocus: true,
+				replace: true,
+				reset: false,
 				state: page.state
 			});
 			return;
@@ -71,8 +70,7 @@ export function useBrowseLocation(options: { onLocationChange: () => void }) {
 		const nextIndex = historyIndex + 1;
 		historyMaxIndex = nextIndex;
 		void goto(target, {
-			noScroll: true,
-			keepFocus: true,
+			reset: false,
 			state: { ...page.state, browseHistoryIndex: nextIndex }
 		});
 	}

@@ -1,4 +1,4 @@
-import { CONFIG } from '$lib/config';
+import { CONFIG } from '#lib/config.js';
 import { ApiRequestError, parseResponse, type AccessTokenResponse } from './client';
 import type { FileList } from './files';
 

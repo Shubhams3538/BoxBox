@@ -9,10 +9,10 @@
 		Image as ImageIcon,
 		Upload
 	} from 'lucide-svelte';
-	import { Button, Modal, ProgressBar, Select } from '$lib/components/ui';
-	import { listDirectory, listRoots, type FileInfo, type MountPoint } from '$lib/api/files';
-	import { resolveBackgroundImage, toServerBackgroundImage } from '$lib/utils/appearance';
-	import { formatFileSize } from '$lib/utils/format';
+	import { Button, Modal, ProgressBar, Select } from '#lib/components/ui/index.js';
+	import { listDirectory, listRoots, type FileInfo, type MountPoint } from '#lib/api/files.js';
+	import { resolveBackgroundImage, toServerBackgroundImage } from '#lib/utils/appearance.js';
+	import { formatFileSize } from '#lib/utils/format.js';
 	import {
 		DEFAULT_BACKGROUND_IMAGE_MODE,
 		WALLPAPER_DISPLAY_OPTIONS,
@@ -21,7 +21,7 @@
 		normalizeBackgroundImageMode,
 		readFileAsDataUrl,
 		type BackgroundImageMode
-	} from '$lib/utils/wallpaper';
+	} from '#lib/utils/wallpaper.js';
 
 	type WallpaperSource = 'server';
 	type PreviewOrigin = 'server' | 'local';

@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import type { PreviewType } from '$lib/utils/fileTypes';
+import type { PreviewType } from '#lib/utils/fileTypes.js';
 
 type PreviewComponent = Component<Record<string, unknown>>;
 type PreviewModule = { default: unknown };

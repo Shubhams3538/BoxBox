@@ -286,12 +286,12 @@ export function truncateFilename(filename: string, maxLength: number = 30): stri
 	return name.slice(0, availableLength) + '...' + extension;
 }
 
-// Note: getFileTypeDescription has been moved to $lib/utils/fileTypes.ts
-// Import it from there: import { getFileTypeDescription } from '$lib/utils/fileTypes';
-export { getFileTypeDescription } from '$lib/utils/fileTypes';
+// Note: getFileTypeDescription has been moved to #lib/utils/fileTypes.ts
+// Import it from there: import { getFileTypeDescription } from '#lib/utils/fileTypes.js';
+export { getFileTypeDescription } from '#lib/utils/fileTypes.js';
 
-import { CONFIG } from '$lib/config';
-import type { MountPoint } from '$lib/api/files';
+import { CONFIG } from '#lib/config.js';
+import type { MountPoint } from '#lib/api/files.js';
 
 /**
  * Map a system mount point (as returned by df/system drives API) to a browsable path in the app.

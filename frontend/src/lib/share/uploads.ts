@@ -1,5 +1,5 @@
-import { ApiRequestError, createShareFolder, shareUploadUrl } from '$lib/api';
-import { foldersFor, type UploadEntry } from '$lib/utils/uploadEntries';
+import { ApiRequestError, createShareFolder, shareUploadUrl } from '#lib/api/index.js';
+import { foldersFor, type UploadEntry } from '#lib/utils/uploadEntries.js';
 
 /** Uploads a batch with the share identity captured before reading local files. */
 export async function uploadShareEntries({
