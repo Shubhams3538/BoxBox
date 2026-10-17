@@ -3,11 +3,11 @@
 	 * ShareLinkList - table of share links with copy and revoke, shared by the share dialog and settings.
 	 */
 	import { Check, Copy, Trash2 } from 'lucide-svelte';
-	import { hasShareExpiry, revokeShare, type ShareRecord } from '$lib/api';
-	import { copyText } from '$lib/utils/clipboard';
-	import { getFileIcon } from '$lib/utils/fileTypes';
-	import { formatFileSize, formatRelativeTime } from '$lib/utils/format';
-	import { getShareAccessLabel } from '$lib/utils/shareAccess';
+	import { hasShareExpiry, revokeShare, type ShareRecord } from '#lib/api/index.js';
+	import { copyText } from '#lib/utils/clipboard.js';
+	import { getFileIcon } from '#lib/utils/fileTypes.js';
+	import { formatFileSize, formatRelativeTime } from '#lib/utils/format.js';
+	import { getShareAccessLabel } from '#lib/utils/shareAccess.js';
 
 	interface Props {
 		shares: ShareRecord[];

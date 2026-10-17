@@ -3,7 +3,7 @@
 	 * ImagePreview - Image viewer with zoom support
 	 */
 	import { ZoomIn, ZoomOut, RotateCw } from 'lucide-svelte';
-	import { Button } from '$lib/components/ui';
+	import { Button } from '#lib/components/ui/index.js';
 
 	interface Props {
 		url: string;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { AuthRefreshEvent, clearTokens, getAccessToken, setAccessToken } from '$lib/api/client';
+import { AuthRefreshEvent, clearTokens, getAccessToken, setAccessToken } from '#lib/api/client.js';
 import { authStore } from './auth.svelte';
 import { settingsStore } from './settings.svelte';
 

@@ -3,7 +3,7 @@
  */
 
 import { api, buildUrl } from './client';
-import { tokenStorage } from '$lib/utils/storage';
+import { tokenStorage } from '#lib/utils/storage.js';
 
 /**
  * File/directory metadata

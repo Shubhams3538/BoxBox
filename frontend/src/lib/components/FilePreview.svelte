@@ -3,11 +3,11 @@
 	 * FilePreview - Modal component for previewing files
 	 */
 	import { X, Download, Maximize2, Minimize2, ChevronLeft, ChevronRight } from 'lucide-svelte';
-	import type { FileInfo } from '$lib/api/files';
-	import { getPreviewUrl, getDownloadUrl, saveFileContent } from '$lib/api/files';
-	import { getPreviewType, type PreviewType } from '$lib/utils/fileTypes';
-	import { formatFileSize } from '$lib/utils/format';
-	import { Button, Spinner } from '$lib/components/ui';
+	import type { FileInfo } from '#lib/api/files.js';
+	import { getPreviewUrl, getDownloadUrl, saveFileContent } from '#lib/api/files.js';
+	import { getPreviewType, type PreviewType } from '#lib/utils/fileTypes.js';
+	import { formatFileSize } from '#lib/utils/format.js';
+	import { Button, Spinner } from '#lib/components/ui/index.js';
 	import { loadPreviewComponent } from './preview/registry';
 
 	interface Props {

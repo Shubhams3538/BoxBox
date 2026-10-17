@@ -3,7 +3,7 @@
  * Single point of access for all browser storage operations
  */
 
-import { STORAGE_KEYS } from '$lib/config';
+import { STORAGE_KEYS } from '#lib/config.js';
 
 /**
  * Generic storage utilities

@@ -3,16 +3,16 @@
 	 * FileList component with sortable columns - FilePilot style
 	 */
 
-	import type { FileInfo } from '$lib/api/files';
-	import type { SortField, SortDir } from '$lib/types/files';
-	import { formatFileSize, formatFileDate } from '$lib/utils/format';
-	import { getFileTypeDescription, getFileIcon } from '$lib/utils/fileTypes';
-	import { getFileContextMenuItems } from '$lib/utils/fileContextMenu';
+	import type { FileInfo } from '#lib/api/files.js';
+	import type { SortField, SortDir } from '#lib/types/files.js';
+	import { formatFileSize, formatFileDate } from '#lib/utils/format.js';
+	import { getFileTypeDescription, getFileIcon } from '#lib/utils/fileTypes.js';
+	import { getFileContextMenuItems } from '#lib/utils/fileContextMenu.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { Spinner, ContextMenu } from '$lib/components/ui';
+	import { Spinner, ContextMenu } from '#lib/components/ui/index.js';
 	import { FolderOpen } from 'lucide-svelte';
-	import { CONFIG } from '$lib/config';
-	import { createDelayedFlag } from '$lib/utils/delayedFlag.svelte';
+	import { CONFIG } from '#lib/config.js';
+	import { createDelayedFlag } from '#lib/utils/delayedFlag.svelte.js';
 
 	let {
 		items = [],

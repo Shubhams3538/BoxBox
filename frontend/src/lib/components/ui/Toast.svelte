@@ -3,7 +3,7 @@
 	 * Toast notification container component
 	 * Displays toast notifications from the toastStore
 	 */
-	import { toastStore } from '$lib/stores/toast.svelte';
+	import { toastStore } from '#lib/stores/toast.svelte.js';
 	import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-svelte';
 	import { fly, fade } from 'svelte/transition';
 

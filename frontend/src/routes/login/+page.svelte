@@ -2,10 +2,10 @@
 	/**
 	 * Login page component
 	 */
-	import { authStore } from '$lib/stores/auth.svelte';
+	import { authStore } from '#lib/stores/auth.svelte.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { Button, Input, Spinner } from '$lib/components/ui';
+	import { Button, Input, Spinner } from '#lib/components/ui/index.js';
 	import { X, AlertTriangle } from 'lucide-svelte';
 
 	let username = $state('');
@@ -21,7 +21,7 @@
 
 		const success = await authStore.login(username.trim(), password);
 		if (success) {
-			goto(resolve('/browse'));
+			goto(resolve('browse'));
 		}
 	}
 

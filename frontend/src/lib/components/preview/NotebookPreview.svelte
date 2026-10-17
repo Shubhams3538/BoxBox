@@ -3,8 +3,8 @@
 	 * NotebookPreview - Jupyter notebook renderer without Monaco
 	 */
 	import { AlertTriangle, BookOpen, Image as ImageIcon, Play } from 'lucide-svelte';
-	import { getFileContent } from '$lib/api/files';
-	import { Spinner } from '$lib/components/ui';
+	import { getFileContent } from '#lib/api/files.js';
+	import { Spinner } from '#lib/components/ui/index.js';
 
 	type NotebookText = string | string[];
 

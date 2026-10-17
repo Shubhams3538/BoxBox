@@ -16,8 +16,8 @@
 		Video,
 		X
 	} from 'lucide-svelte';
-	import { settingsStore } from '$lib/stores/settings.svelte';
-	import type { MountPoint } from '$lib/api/files';
+	import { settingsStore } from '#lib/stores/settings.svelte.js';
+	import type { MountPoint } from '#lib/api/files.js';
 
 	interface Props {
 		currentPath?: string;

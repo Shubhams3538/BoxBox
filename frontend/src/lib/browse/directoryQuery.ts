@@ -1,7 +1,7 @@
 import { infiniteQueryOptions } from '@tanstack/svelte-query';
-import { earlyStart, type EarlyStartSource } from '$lib/api/earlyStart';
-import { directoryUrl, listDirectory, type ListOptions } from '$lib/api/files';
-import { fileQueryKeys } from '$lib/stores/files';
+import { earlyStart, type EarlyStartSource } from '#lib/api/earlyStart.js';
+import { directoryUrl, listDirectory, type ListOptions } from '#lib/api/files.js';
+import { fileQueryKeys } from '#lib/stores/files.js';
 
 /** One definition for the folder query, shared by the open folder and hover prefetch so they share a cache entry. */
 export function directoryQueryOptions(

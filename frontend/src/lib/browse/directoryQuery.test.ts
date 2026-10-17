@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { InfiniteQueryObserver, QueryClient } from '@tanstack/svelte-query';
-import { CONFIG } from '$lib/config';
-import type { EarlyStartSource } from '$lib/api/earlyStart';
-import type { FileList } from '$lib/api/files';
+import { CONFIG } from '#lib/config.js';
+import type { EarlyStartSource } from '#lib/api/earlyStart.js';
+import type { FileList } from '#lib/api/files.js';
 import { directoryQueryOptions } from './directoryQuery';
 
 const realFetch = globalThis.fetch;

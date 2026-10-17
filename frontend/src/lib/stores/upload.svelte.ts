@@ -3,11 +3,11 @@
  * Manages sequential file uploads with progress tracking
  */
 
-import type { UploadProgress, UploadOptions } from '$lib/utils/upload';
-import { generateUploadId, getChunkCount } from '$lib/utils/uploadIds';
-import { getUploadConfig } from '$lib/api/system';
-import { CONFIG } from '$lib/config';
-import type { UploadEntry } from '$lib/utils/uploadEntries';
+import type { UploadProgress, UploadOptions } from '#lib/utils/upload.js';
+import { generateUploadId, getChunkCount } from '#lib/utils/uploadIds.js';
+import { getUploadConfig } from '#lib/api/system.js';
+import { CONFIG } from '#lib/config.js';
+import type { UploadEntry } from '#lib/utils/uploadEntries.js';
 
 export type { UploadProgress };
 
@@ -163,7 +163,7 @@ class UploadStore {
 				}
 			};
 			// The transfer and hashing code loads with the first upload, not with the page.
-			const { resumeUpload } = await import('$lib/utils/upload');
+			const { resumeUpload } = await import('#lib/utils/upload.js');
 			if (controller.signal.aborted) return;
 			const result = await resumeUpload(item.file, item.destPath, item.uploadId, options);
 

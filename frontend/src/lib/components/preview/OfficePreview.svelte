@@ -4,8 +4,8 @@
 	 */
 	import { tick, untrack } from 'svelte';
 	import { AlertTriangle, Download, Sheet, Table2 } from 'lucide-svelte';
-	import { Button, Spinner } from '$lib/components/ui';
-	import { getExtension } from '$lib/utils/fileTypes';
+	import { Button, Spinner } from '#lib/components/ui/index.js';
+	import { getExtension } from '#lib/utils/fileTypes.js';
 
 	type PreviewMode = 'docx' | 'sheet' | 'pptx' | 'unsupported';
 	type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';

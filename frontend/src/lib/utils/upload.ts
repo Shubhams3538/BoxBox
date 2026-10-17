@@ -4,8 +4,8 @@
 
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { getAccessToken } from '$lib/api/client';
-import { CONFIG } from '$lib/config';
+import { getAccessToken } from '#lib/api/client.js';
+import { CONFIG } from '#lib/config.js';
 import { generateUploadId, getChunkCount } from './uploadIds';
 
 const DEFAULT_CHUNK_SIZE = CONFIG.upload.defaultChunkSize;
