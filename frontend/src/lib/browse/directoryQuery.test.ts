@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
-import { InfiniteQueryObserver, QueryClient } from '@tanstack/svelte-query';
+import { QueryClient, QueryObserver } from '@tanstack/svelte-query';
 import { CONFIG } from '#lib/config.js';
 import type { EarlyStartSource } from '#lib/api/earlyStart.js';
 import type { FileList } from '#lib/api/files.js';
@@ -8,7 +8,7 @@ import { directoryQueryOptions } from './directoryQuery';
 
 const realFetch = globalThis.fetch;
 const realWindow = globalThis.window;
-const options = { pageSize: 50, sortBy: 'name', sortDir: 'asc' } as const;
+const options = { sortBy: 'name', sortDir: 'asc' } as const;
 let listRequests = 0;
 let names: string[] = [];
 
@@ -21,13 +21,7 @@ beforeEach(() => {
 		fetch: async () => {
 			listRequests++;
 			const items = names.map((name) => ({ name, path: `media/${name}`, isDir: false }));
-			return Response.json({
-				path: 'media',
-				items,
-				totalCount: items.length,
-				page: 1,
-				pageSize: 50
-			});
+			return Response.json({ path: 'media', items });
 		}
 	});
 });
@@ -40,7 +34,7 @@ describe('open folder freshness', () => {
 	test('a hover prefetch fills the cache once, however often the pointer returns', async () => {
 		const queryClient = new QueryClient();
 		const prefetch = () =>
-			queryClient.prefetchInfiniteQuery({
+			queryClient.prefetchQuery({
 				...directoryQueryOptions('media', options),
 				staleTime: CONFIG.query.prefetchStaleTimeMs
 			});
@@ -49,32 +43,29 @@ describe('open folder freshness', () => {
 		assert.equal(listRequests, 1);
 	});
 
-	test('opening a prefetched folder shows its page at once, then confirms it with the server', async () => {
+	test('opening a prefetched folder shows its listing at once, then confirms it with the server', async () => {
 		const queryClient = new QueryClient();
-		await queryClient.prefetchInfiniteQuery({
+		await queryClient.prefetchQuery({
 			...directoryQueryOptions('media', options),
 			staleTime: CONFIG.query.prefetchStaleTimeMs
 		});
 		names = ['a.txt', 'added-outside.txt']; // a change made after the prefetch
 
-		const observer = new InfiniteQueryObserver(
-			queryClient,
-			directoryQueryOptions('media', options)
-		);
+		const observer = new QueryObserver(queryClient, directoryQueryOptions('media', options));
 		const unsubscribe = observer.subscribe(() => {});
-		const atOnce = observer.getCurrentResult().data?.pages[0].items.map((item) => item.name);
-		assert.deepEqual(atOnce, ['a.txt'], 'the cached page must not wait for the network');
+		const atOnce = observer.getCurrentResult().data?.items.map((item) => item.name);
+		assert.deepEqual(atOnce, ['a.txt'], 'the cached listing must not wait for the network');
 
 		await settle();
-		assert.equal(listRequests, 2, 'the open folder must always ask the server');
-		const confirmed = observer.getCurrentResult().data?.pages[0].items.map((item) => item.name);
+		assert.equal(listRequests, 2, 'opening the folder must always ask the server');
+		const confirmed = observer.getCurrentResult().data?.items.map((item) => item.name);
 		assert.deepEqual(confirmed, ['a.txt', 'added-outside.txt']);
 		unsubscribe();
 	});
 });
 
-describe('first page from the shell', () => {
-	const page = (number: number, name: string): FileList => ({
+describe('early listing from the shell', () => {
+	const listing = (name: string): FileList => ({
 		path: 'media',
 		items: [
 			{
@@ -86,61 +77,37 @@ describe('first page from the shell', () => {
 				permissions: '',
 				mimeType: ''
 			}
-		],
-		totalCount: 120,
-		page: number,
-		pageSize: 50
+		]
 	});
-	let asked: string[] = [];
 	const source = (early: FileList | null): EarlyStartSource => ({
 		takeSession: async () => null,
-		takeDirectory: async (url) => {
-			asked.push(url);
-			return early;
-		}
+		takeDirectory: async () => early
 	});
 
 	beforeEach(() => {
-		asked = [];
 		Object.assign(globalThis, {
-			fetch: async (input: string) => {
+			fetch: async () => {
 				listRequests++;
-				const number = Number(new URL(input).searchParams.get('page'));
-				return Response.json(page(number, `network-${number}.txt`));
+				return Response.json(listing(`network-${listRequests}.txt`));
 			}
 		});
 	});
 
-	test('is used as it is, with no request of its own', async () => {
+	test('uses the matching early listing without making its own request', async () => {
 		const queryClient = new QueryClient();
-		const data = await queryClient.fetchInfiniteQuery(
-			directoryQueryOptions('media', options, source(page(1, 'early-1.txt')))
+		const data = await queryClient.fetchQuery(
+			directoryQueryOptions('media', options, source(listing('early.txt')))
 		);
-		assert.equal(data.pages[0].items[0].name, 'early-1.txt');
+		assert.equal(data.items[0].name, 'early.txt');
 		assert.equal(listRequests, 0);
-		assert.match(asked[0], /\/files\/list\/media\?page=1&pageSize=50&sortBy=name&sortDir=asc/);
-	});
-
-	test('is asked for the first page only; later pages come from the network', async () => {
-		const queryClient = new QueryClient();
-		const data = await queryClient.fetchInfiniteQuery({
-			...directoryQueryOptions('media', options, source(page(1, 'early-1.txt'))),
-			pages: 3
-		});
-		assert.deepEqual(
-			data.pages.map((loaded) => loaded.items[0].name),
-			['early-1.txt', 'network-2.txt', 'network-3.txt']
-		);
-		assert.equal(asked.length, 1);
-		assert.equal(listRequests, 2);
 	});
 
 	test('falls back to the network when the shell has nothing usable', async () => {
 		const queryClient = new QueryClient();
-		const data = await queryClient.fetchInfiniteQuery(
+		const data = await queryClient.fetchQuery(
 			directoryQueryOptions('media', options, source(null))
 		);
-		assert.equal(data.pages[0].items[0].name, 'network-1.txt');
+		assert.equal(data.items[0].name, 'network-1.txt');
 		assert.equal(listRequests, 1);
 	});
 });

@@ -1,5 +1,5 @@
-// Starts the first folder listing while the app's JavaScript downloads, so the page of files is already
-// on its way when the app asks for it. src/lib/api/earlyStart.ts takes over what this starts.
+// Starts the folder listing while the app's JavaScript downloads, so it is already on its way when the
+// app asks for it. src/lib/api/earlyStart.ts takes over what this starts.
 // The request must match listDirectory in src/lib/api/files.ts; earlyStart.test.ts checks that.
 (() => {
 	// `null` means the app started first and took over. Start nothing then: a second token refresh
@@ -22,8 +22,6 @@
 		`/api/v1/files/list/${path.split('/').map(encodeURIComponent).join('/')}`,
 		location.origin
 	);
-	url.searchParams.append('page', 1);
-	url.searchParams.append('pageSize', 50);
 	url.searchParams.append(
 		'sortBy',
 		['name', 'size', 'modTime', 'type'].includes(sort) ? sort : (settings.defaultSortBy ?? 'name')

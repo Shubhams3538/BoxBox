@@ -36,6 +36,16 @@ export function useBrowseLocation(options: { onLocationChange: () => void }) {
 				? 'list'
 				: settingsStore.current.defaultViewMode
 	);
+	const viewKey = $derived(
+		JSON.stringify([
+			path,
+			isSearchActive ? trimmedSearchQuery : '',
+			sortBy,
+			sortDir,
+			viewMode,
+			settingsStore.current.showHiddenFiles
+		])
+	);
 	const historyIndex = $derived(page.state.browseHistoryIndex ?? 0);
 	const canGoBack = $derived(historyIndex > 0);
 	const canGoForward = $derived(historyIndex < historyMaxIndex);
@@ -104,6 +114,9 @@ export function useBrowseLocation(options: { onLocationChange: () => void }) {
 		},
 		get viewMode() {
 			return viewMode;
+		},
+		get viewKey() {
+			return viewKey;
 		},
 		get canGoBack() {
 			return canGoBack;

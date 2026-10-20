@@ -42,6 +42,7 @@
 
 	const LOCAL_WALLPAPER_MAX_BYTES = 20 * 1024 * 1024;
 	const PREVIEW_ROWS = [0, 1, 2, 3, 4, 5];
+	const SERVER_WALLPAPER_ITEMS_LIMIT = 200;
 
 	let {
 		open = true,
@@ -117,13 +118,11 @@
 
 		try {
 			const response = await listDirectory(path, {
-				page: 1,
-				pageSize: 200,
 				sortBy: 'name',
 				sortDir: 'asc',
 				includeHidden: showHiddenFiles
 			});
-			serverWallpaperItems = response.items;
+			serverWallpaperItems = response.items.slice(0, SERVER_WALLPAPER_ITEMS_LIMIT);
 		} catch (error) {
 			serverWallpaperError = error instanceof Error ? error.message : 'Unable to open this folder.';
 			serverWallpaperItems = [];

@@ -13,19 +13,14 @@ type FileInfo struct {
 	MimeType    string    `json:"mimeType,omitempty"`
 }
 
-// FileList represents a paginated list of files in a directory
+// FileList represents the files and directories in a directory
 type FileList struct {
-	Path       string     `json:"path"`
-	Items      []FileInfo `json:"items"`
-	TotalCount int        `json:"totalCount"`
-	Page       int        `json:"page"`
-	PageSize   int        `json:"pageSize"`
+	Path  string     `json:"path"`
+	Items []FileInfo `json:"items"`
 }
 
 // ListOptions contains options for listing directory contents
 type ListOptions struct {
-	Page          int    `json:"page"`
-	PageSize      int    `json:"pageSize"`
 	SortBy        string `json:"sortBy"`
 	SortDir       string `json:"sortDir"`
 	Filter        string `json:"filter"`
@@ -35,11 +30,8 @@ type ListOptions struct {
 // DefaultListOptions returns sensible defaults for listing
 func DefaultListOptions() ListOptions {
 	return ListOptions{
-		Page:          1,
-		PageSize:      50,
 		SortBy:        "name",
 		SortDir:       "asc",
-		Filter:        "",
 		IncludeHidden: true,
 	}
 }

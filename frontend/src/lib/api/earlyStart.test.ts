@@ -11,7 +11,7 @@ import { tokenStorage } from '#lib/utils/storage.js';
 const script = readFileSync(new URL('../../../static/early-fetch.js', import.meta.url), 'utf8');
 const origin = 'http://localhost';
 const tokens = { accessToken: 'early-token', expiresAt: '2030-01-01T00:00:00Z' };
-const listing: FileList = { path: 'files/C', items: [], totalCount: 0, page: 1, pageSize: 50 };
+const listing: FileList = { path: 'files/C', items: [] };
 
 type Win = Pick<Window, 'boxboxEarly'>;
 interface Call {
@@ -128,7 +128,7 @@ describe('the shell script asks for the listing the app would ask for', () => {
 				settings: 'settings' in rest ? rest.settings : null,
 				isDevelopment: true
 			});
-			const expected = directoryUrl(path, { ...options, page: 1, pageSize: 50 });
+			const expected = directoryUrl(path, options);
 			assert.equal(win.boxboxEarly?.list.url, expected);
 		});
 	}
@@ -144,7 +144,7 @@ describe('the shell script', () => {
 				['POST', '/api/v1/auth/refresh', undefined],
 				[
 					'GET',
-					'/api/v1/files/list/files/C?page=1&pageSize=50&sortBy=name&sortDir=asc&includeHidden=false',
+					'/api/v1/files/list/files/C?sortBy=name&sortDir=asc&includeHidden=false',
 					'Bearer early-token'
 				]
 			]
@@ -209,8 +209,6 @@ describe('the app takes over what the shell started', () => {
 		const session = await early.takeSession();
 		const first = await early.takeDirectory(
 			directoryUrl('files/C', {
-				page: 1,
-				pageSize: 50,
 				sortBy: 'name',
 				sortDir: 'asc',
 				includeHidden: false
@@ -248,8 +246,6 @@ describe('the app takes over what the shell started', () => {
 		const { win } = runShell({});
 		const early = createEarlyStart(() => win);
 		const other = directoryUrl('files/D', {
-			page: 1,
-			pageSize: 50,
 			sortBy: 'name',
 			sortDir: 'asc',
 			includeHidden: false

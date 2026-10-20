@@ -51,7 +51,7 @@ func get(handler http.Handler, target, acceptEncoding string) *httptest.Response
 
 func TestDirectoryListingIsGzippedWhenAccepted(t *testing.T) {
 	handler := newCompressionTestServer(t)
-	const target = "/api/v1/files/list/files?page=1&pageSize=50"
+	const target = "/api/v1/files/list/files"
 
 	plain := get(handler, target, "")
 	if plain.Code != http.StatusOK || plain.Header().Get("Content-Encoding") != "" {
@@ -123,9 +123,9 @@ func TestFileDownloadsAreNotRecompressed(t *testing.T) {
 
 func TestSmallResponsesOnCompressedRoutesAreNotGzipped(t *testing.T) {
 	handler := newCompressionTestServer(t)
-	// An empty page of a listing and a search with no matches: both go through the compression middleware.
+	// A filtered listing with no matches and a search with no matches both stay small.
 	for _, target := range []string{
-		"/api/v1/files/list/files?page=9",
+		"/api/v1/files/list/files?filter=zzzzzz",
 		"/api/v1/search?path=files&q=zzzzzz",
 	} {
 		plain := get(handler, target, "")
@@ -154,7 +154,7 @@ func TestGzipIsSkippedWhenTheClientRefusesIt(t *testing.T) {
 	handler := newCompressionTestServer(t)
 	// Large enough to be gzipped if the refusal were ignored.
 	for _, acceptEncoding := range []string{"gzip;q=0", "gzip;q=0.0", "gzip;q=0.000", "br, gzip;q=0.000"} {
-		rec := get(handler, "/api/v1/files/list/files?page=1&pageSize=50", acceptEncoding)
+		rec := get(handler, "/api/v1/files/list/files", acceptEncoding)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%q: status %d", acceptEncoding, rec.Code)
 		}

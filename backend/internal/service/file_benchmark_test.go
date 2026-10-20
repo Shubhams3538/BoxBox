@@ -34,57 +34,23 @@ func BenchmarkDirectoryListing(b *testing.B) {
 			})
 
 			ctx := context.Background()
-			for _, page := range []int{1, 2} {
-				page := page
-				b.Run(fmt.Sprintf("page_%d", page), func(b *testing.B) {
-					opts := model.ListOptions{Page: page, PageSize: 50, SortBy: "name", SortDir: "asc"}
-					b.ReportAllocs()
-					b.ResetTimer()
-					for i := 0; i < b.N; i++ {
-						list, err := svc.List(ctx, "benchmark", opts)
-						if err != nil {
-							b.Fatal(err)
-						}
-						if list.TotalCount != count || len(list.Items) != 50 || list.Page != page {
-							b.Fatalf("unexpected listing: page %d, %d total, %d items", list.Page, list.TotalCount, len(list.Items))
-						}
-						for i, item := range list.Items {
-							if want := names[(page-1)*50+i]; item.Name != want {
-								b.Fatalf("unexpected item %d: got %q, want %q", i, item.Name, want)
-							}
-						}
-					}
-				})
-			}
-
-			b.Run("full_traversal", func(b *testing.B) {
-				opts := model.ListOptions{Page: 1, PageSize: 50, SortBy: "name", SortDir: "asc"}
-				b.ReportAllocs()
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					seen := 0
-					for page := 1; seen < count; page++ {
-						opts.Page = page
-						list, err := svc.List(ctx, "benchmark", opts)
-						if err != nil {
-							b.Fatal(err)
-						}
-						wantLen := min(50, count-seen)
-						if list.TotalCount != count || list.Page != page || len(list.Items) != wantLen {
-							b.Fatalf("unexpected listing at page %d: %d total, %d items; want %d", list.Page, list.TotalCount, len(list.Items), wantLen)
-						}
-						for j, item := range list.Items {
-							if want := names[seen+j]; item.Name != want {
-								b.Fatalf("unexpected item %d on page %d: got %q, want %q", j, page, item.Name, want)
-							}
-						}
-						seen += len(list.Items)
-					}
-					if seen != count {
-						b.Fatalf("unexpected traversal count: got %d, want %d", seen, count)
+			opts := model.ListOptions{SortBy: "name", SortDir: "asc"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				list, err := svc.List(ctx, "benchmark", opts)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if list.Path != "benchmark" || len(list.Items) != count {
+					b.Fatalf("unexpected listing: path %q, %d items; want benchmark and %d", list.Path, len(list.Items), count)
+				}
+				for i, item := range list.Items {
+					if want := names[i]; item.Name != want {
+						b.Fatalf("unexpected item %d: got %q, want %q", i, item.Name, want)
 					}
 				}
-			})
+			}
 		})
 	}
 }

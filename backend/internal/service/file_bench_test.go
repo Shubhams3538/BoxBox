@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"mime"
+	"reflect"
 	"testing"
 
 	"github.com/jR4dh3y/BoxBox/backend/internal/model"
@@ -17,7 +19,7 @@ func setupBenchDirectory(tb testing.TB, entries int) FileService {
 	if err := fs.MkdirAll(dir, 0755); err != nil {
 		tb.Fatal(err)
 	}
-	for i := 0; i < entries; i++ {
+	for i := range entries {
 		name := fmt.Sprintf("%s/File-%05d.TXT", dir, (i*7919)%entries)
 		if err := fs.WriteFile(name, []byte("x"), 0644); err != nil {
 			tb.Fatal(err)
@@ -26,16 +28,32 @@ func setupBenchDirectory(tb testing.TB, entries int) FileService {
 	return svc
 }
 
+// fullListingBenchOptions keeps archived pagination baselines on the same full-list workload.
+func fullListingBenchOptions(sortBy string, entries int) model.ListOptions {
+	opts := model.ListOptions{SortBy: sortBy, SortDir: "asc"}
+	pageSize := reflect.ValueOf(&opts).Elem().FieldByName("PageSize")
+	if pageSize.IsValid() && pageSize.CanSet() && pageSize.Kind() == reflect.Int {
+		pageSize.SetInt(int64(entries))
+	}
+	return opts
+}
+
 func BenchmarkListDirectory(b *testing.B) {
 	svc := setupBenchDirectory(b, benchDirectoryEntries)
 	ctx := context.Background()
+	// MIME tables initialize once per process, not once per directory listing.
+	mime.TypeByExtension(".TXT")
 	for _, sortBy := range []string{"name", "type", "size", "modTime"} {
 		b.Run(sortBy, func(b *testing.B) {
-			opts := model.ListOptions{Page: 1, PageSize: 50, SortBy: sortBy, SortDir: "asc"}
+			opts := fullListingBenchOptions(sortBy, benchDirectoryEntries)
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := svc.List(ctx, "media/bench", opts); err != nil {
+				list, err := svc.List(ctx, "media/bench", opts)
+				if err != nil {
 					b.Fatal(err)
+				}
+				if len(list.Items) != benchDirectoryEntries {
+					b.Fatalf("got %d items, want %d", len(list.Items), benchDirectoryEntries)
 				}
 			}
 		})
@@ -50,10 +68,14 @@ func TestListDirectoryAllocationCeiling(t *testing.T) {
 	ctx := context.Background()
 	for _, sortBy := range []string{"name", "type", "size", "modTime"} {
 		ceiling := allocationCeiling(t, "list/"+sortBy)
-		opts := model.ListOptions{Page: 1, PageSize: 50, SortBy: sortBy, SortDir: "asc"}
+		opts := fullListingBenchOptions(sortBy, entries)
 		allocs := testing.AllocsPerRun(5, func() {
-			if _, err := svc.List(ctx, "media/bench", opts); err != nil {
+			list, err := svc.List(ctx, "media/bench", opts)
+			if err != nil {
 				t.Fatal(err)
+			}
+			if len(list.Items) != entries {
+				t.Fatalf("got %d items, want %d", len(list.Items), entries)
 			}
 		})
 		t.Logf("sort=%s allocs=%.0f ceiling=%.0f", sortBy, allocs, ceiling)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -33,7 +34,18 @@ func setupTestFileService() (FileService, *filesystem.AferoFS) {
 	return svc, fs
 }
 
-func TestDirectoryListingPutsVisibleItemsBeforeHiddenItems(t *testing.T) {
+type truncatedDirectoryListingFS struct {
+	filesystem.FS
+}
+
+func (f truncatedDirectoryListingFS) ReadDirFileInfoLimit(_ string, limit int) ([]fs.FileInfo, bool, error) {
+	if limit != 10_000 {
+		return nil, false, fmt.Errorf("unexpected directory limit %d", limit)
+	}
+	return nil, true, nil
+}
+
+func TestDirectoryListingSortsVisibleItemsBeforeHiddenItems(t *testing.T) {
 	svc, fs := setupTestFileService()
 	ctx := context.Background()
 
@@ -42,7 +54,7 @@ func TestDirectoryListingPutsVisibleItemsBeforeHiddenItems(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if err := fs.WriteFile(fmt.Sprintf("%s/.hidden%02d", testDir, i), []byte("content"), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -54,14 +66,15 @@ func TestDirectoryListingPutsVisibleItemsBeforeHiddenItems(t *testing.T) {
 	}
 
 	list, err := svc.List(ctx, "media/hidden-first", model.ListOptions{
-		Page:          1,
-		PageSize:      3,
 		SortBy:        "name",
 		SortDir:       "asc",
 		IncludeHidden: true,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(list.Items) != 23 {
+		t.Fatalf("got %d items, want 23", len(list.Items))
 	}
 
 	got := make([]string, 0, len(list.Items))
@@ -70,12 +83,12 @@ func TestDirectoryListingPutsVisibleItemsBeforeHiddenItems(t *testing.T) {
 	}
 
 	want := []string{"Desktop", "Documents", "Downloads"}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("expected first page to contain visible items %v, got %v", want, got)
+	if fmt.Sprint(got[:len(want)]) != fmt.Sprint(want) {
+		t.Fatalf("visible items should sort before hidden items: want %v, got %v", want, got[:len(want)])
 	}
 }
 
-func TestDirectoryListingCanExcludeHiddenItemsBeforePagination(t *testing.T) {
+func TestDirectoryListingCanExcludeHiddenItems(t *testing.T) {
 	svc, fs := setupTestFileService()
 	ctx := context.Background()
 
@@ -91,8 +104,6 @@ func TestDirectoryListingCanExcludeHiddenItemsBeforePagination(t *testing.T) {
 	}
 
 	list, err := svc.List(ctx, "media/visible-count", model.ListOptions{
-		Page:          1,
-		PageSize:      50,
 		SortBy:        "name",
 		SortDir:       "asc",
 		IncludeHidden: false,
@@ -101,19 +112,17 @@ func TestDirectoryListingCanExcludeHiddenItemsBeforePagination(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if list.TotalCount != 2 || len(list.Items) != 2 {
-		t.Fatalf("expected only visible items in count/page, got total=%d page=%d", list.TotalCount, len(list.Items))
+	if len(list.Items) != 2 {
+		t.Fatalf("expected only 2 visible items, got %d", len(list.Items))
 	}
 
 	for _, item := range list.Items {
 		if strings.HasPrefix(item.Name, ".") {
-			t.Fatalf("expected hidden item to be excluded before pagination, got %q", item.Name)
+			t.Fatalf("hidden item was not excluded: %q", item.Name)
 		}
 	}
 
 	list, err = svc.List(ctx, "media/visible-count", model.ListOptions{
-		Page:          1,
-		PageSize:      50,
 		SortBy:        "name",
 		SortDir:       "asc",
 		IncludeHidden: true,
@@ -122,8 +131,32 @@ func TestDirectoryListingCanExcludeHiddenItemsBeforePagination(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if list.TotalCount != 4 || len(list.Items) != 4 {
-		t.Fatalf("expected hidden items when enabled, got total=%d page=%d", list.TotalCount, len(list.Items))
+	if len(list.Items) != 4 {
+		t.Fatalf("expected hidden items when enabled, got %d", len(list.Items))
+	}
+}
+
+func TestDirectoryListingHonorsCanceledContext(t *testing.T) {
+	svc, _ := setupTestFileService()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := svc.List(ctx, "media/canceled", model.DefaultListOptions()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("List error = %v, want context.Canceled", err)
+	}
+}
+
+func TestDirectoryListingEnforcesEntryLimit(t *testing.T) {
+	fsys := filesystem.NewMemMapFS()
+	if err := fsys.MkdirAll("/data/media/large", 0755); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewFileService(truncatedDirectoryListingFS{FS: fsys}, FileServiceConfig{
+		MountPoints: []model.MountPoint{{Name: "media", Path: "/data/media"}},
+	})
+
+	if _, err := svc.List(context.Background(), "media/large", model.DefaultListOptions()); !errors.Is(err, ErrDirectoryTooLarge) {
+		t.Fatalf("List error = %v, want ErrDirectoryTooLarge", err)
 	}
 }
 
@@ -214,13 +247,16 @@ func TestProperty_DirectoryListingMetadataCompleteness(t *testing.T) {
 
 			// Create files with unique names
 			createdFiles := make(map[string]bool)
-			for i := 0; i < numFiles && i < len(fileNames); i++ {
+			for i := range min(numFiles, len(fileNames)) {
 				name := fileNames[i]
 				if name == "" || createdFiles[name] {
 					continue
 				}
 				createdFiles[name] = true
 				fs.WriteFile(testDir+"/"+name, []byte("content"), 0644)
+			}
+			if err := fs.WriteFile(testDir+"/known.pdf", []byte("pdf"), 0644); err != nil {
+				return false
 			}
 
 			// Also create a subdirectory
@@ -232,15 +268,21 @@ func TestProperty_DirectoryListingMetadataCompleteness(t *testing.T) {
 				return false
 			}
 
-			// Verify each item has complete metadata
+			foundPDF := false
 			for _, item := range list.Items {
-				// Name must be non-empty
 				if item.Name == "" {
 					return false
 				}
-
-				// Path must be non-empty and contain the name
-				if item.Path == "" {
+				if item.Path != "media/testdir/"+item.Name {
+					return false
+				}
+				if item.Name == "known.pdf" {
+					if item.IsDir || item.MimeType != "application/pdf" {
+						return false
+					}
+					foundPDF = true
+				}
+				if item.IsDir && item.MimeType != "" {
 					return false
 				}
 
@@ -260,7 +302,7 @@ func TestProperty_DirectoryListingMetadataCompleteness(t *testing.T) {
 				}
 			}
 
-			return true
+			return foundPDF
 		},
 		gen.SliceOfN(25, fileNameGen),
 		numFilesGen,
@@ -309,149 +351,71 @@ func TestProperty_DirectoryListingMetadataCompleteness(t *testing.T) {
 	properties.TestingRun(t)
 }
 
-// **Feature: boxbox, Property 2: Pagination Correctness**
-//
-// Property: For any directory with N items and requested page size P,
-// the returned items count SHALL be at most P, and the totalCount SHALL equal N
-// regardless of page number.
-
-func TestProperty_PaginationCorrectness(t *testing.T) {
+func TestProperty_DirectoryListingCompletenessAndRefresh(t *testing.T) {
 	parameters := gopter.DefaultTestParameters()
 	parameters.MinSuccessfulTests = 100
 	parameters.MaxSize = 50
 
 	properties := gopter.NewProperties(parameters)
-
-	// Generator for number of files
 	numFilesGen := gen.IntRange(0, 100)
 
-	// Generator for page size
-	pageSizeGen := gen.IntRange(1, 50)
-
-	// Generator for page number
-	pageNumGen := gen.IntRange(1, 10)
-
-	properties.Property("returned items count is at most page size", prop.ForAll(
-		func(numFiles int, pageSize int, pageNum int) bool {
+	properties.Property("a single listing returns every file in name order", prop.ForAll(
+		func(numFiles int) bool {
 			svc, fs := setupTestFileService()
-			ctx := context.Background()
-
-			testDir := "/data/media/pagination"
-			fs.MkdirAll(testDir, 0755)
-
-			// Create files
-			for i := 0; i < numFiles; i++ {
-				fs.WriteFile(fmt.Sprintf("%s/file%03d.txt", testDir, i), []byte("content"), 0644)
-			}
-
-			opts := model.ListOptions{
-				Page:     pageNum,
-				PageSize: pageSize,
-				SortBy:   "name",
-				SortDir:  "asc",
-			}
-
-			list, err := svc.List(ctx, "media/pagination", opts)
-			if err != nil {
+			testDir := "/data/media/complete"
+			if err := fs.MkdirAll(testDir, 0755); err != nil {
 				return false
 			}
-
-			// Items count should be at most page size
-			if len(list.Items) > pageSize {
-				return false
-			}
-
-			return true
-		},
-		numFilesGen,
-		pageSizeGen,
-		pageNumGen,
-	))
-
-	properties.Property("totalCount equals actual number of items regardless of page", prop.ForAll(
-		func(numFiles int, pageSize int, pageNum int) bool {
-			svc, fs := setupTestFileService()
-			ctx := context.Background()
-
-			testDir := "/data/media/totalcount"
-			fs.MkdirAll(testDir, 0755)
-
-			// Create files
-			for i := 0; i < numFiles; i++ {
-				fs.WriteFile(fmt.Sprintf("%s/file%03d.txt", testDir, i), []byte("content"), 0644)
-			}
-
-			opts := model.ListOptions{
-				Page:     pageNum,
-				PageSize: pageSize,
-				SortBy:   "name",
-				SortDir:  "asc",
-			}
-
-			list, err := svc.List(ctx, "media/totalcount", opts)
-			if err != nil {
-				return false
-			}
-
-			// TotalCount should equal actual number of files
-			if list.TotalCount != numFiles {
-				return false
-			}
-
-			return true
-		},
-		numFilesGen,
-		pageSizeGen,
-		pageNumGen,
-	))
-
-	properties.Property("pagination covers all items without duplicates", prop.ForAll(
-		func(numFiles int, pageSize int) bool {
-			if numFiles == 0 || pageSize == 0 {
-				return true
-			}
-
-			svc, fs := setupTestFileService()
-			ctx := context.Background()
-
-			testDir := "/data/media/nodupes"
-			fs.MkdirAll(testDir, 0755)
-
-			// Create files
-			for i := 0; i < numFiles; i++ {
-				fs.WriteFile(fmt.Sprintf("%s/file%03d.txt", testDir, i), []byte("content"), 0644)
-			}
-
-			// Collect all items across all pages
-			allItems := make(map[string]bool)
-			totalPages := (numFiles + pageSize - 1) / pageSize
-
-			for page := 1; page <= totalPages; page++ {
-				opts := model.ListOptions{
-					Page:     page,
-					PageSize: pageSize,
-					SortBy:   "name",
-					SortDir:  "asc",
-				}
-
-				list, err := svc.List(ctx, "media/nodupes", opts)
-				if err != nil {
+			for i := range numFiles {
+				name := fmt.Sprintf("file%03d.txt", i)
+				if err := fs.WriteFile(testDir+"/"+name, []byte("content"), 0644); err != nil {
 					return false
 				}
+			}
 
-				for _, item := range list.Items {
-					if allItems[item.Name] {
-						return false // Duplicate found
-					}
-					allItems[item.Name] = true
+			list, err := svc.List(context.Background(), "media/complete", model.DefaultListOptions())
+			if err != nil || len(list.Items) != numFiles {
+				return false
+			}
+			for i, item := range list.Items {
+				if item.Name != fmt.Sprintf("file%03d.txt", i) {
+					return false
+				}
+			}
+			return true
+		},
+		numFilesGen,
+	))
+
+	properties.Property("a refreshed listing includes newly added items", prop.ForAll(
+		func(numFiles int) bool {
+			svc, fs := setupTestFileService()
+			testDir := "/data/media/refresh"
+			if err := fs.MkdirAll(testDir, 0755); err != nil {
+				return false
+			}
+			for i := range numFiles {
+				name := fmt.Sprintf("file%03d.txt", i)
+				if err := fs.WriteFile(testDir+"/"+name, []byte("content"), 0644); err != nil {
+					return false
 				}
 			}
 
-			// Should have collected all files
-			return len(allItems) == numFiles
+			ctx := context.Background()
+			before, err := svc.List(ctx, "media/refresh", model.DefaultListOptions())
+			if err != nil || len(before.Items) != numFiles {
+				return false
+			}
+			if err := fs.WriteFile(testDir+"/zz-refresh.txt", []byte("content"), 0644); err != nil {
+				return false
+			}
+			after, err := svc.List(ctx, "media/refresh", model.DefaultListOptions())
+			return err == nil &&
+				len(before.Items) == numFiles &&
+				len(after.Items) == numFiles+1 &&
+				after.Items[len(after.Items)-1].Name == "zz-refresh.txt"
 		},
-		gen.IntRange(1, 50),
-		gen.IntRange(1, 20),
+		numFilesGen,
 	))
 
 	properties.TestingRun(t)
@@ -482,7 +446,7 @@ func TestProperty_NonExistentPathReturnsError(t *testing.T) {
 
 			// Build a random path that doesn't exist
 			path := "media"
-			for i := 0; i < numSegments && i < len(segments); i++ {
+			for i := range min(numSegments, len(segments)) {
 				if segments[i] != "" {
 					path += "/" + segments[i]
 				}
@@ -506,7 +470,7 @@ func TestProperty_NonExistentPathReturnsError(t *testing.T) {
 
 			// Build a random path that doesn't exist
 			path := "media"
-			for i := 0; i < numSegments && i < len(segments); i++ {
+			for i := range min(numSegments, len(segments)) {
 				if segments[i] != "" {
 					path += "/" + segments[i]
 				}
@@ -650,7 +614,7 @@ func TestProperty_FileRenameCorrectness(t *testing.T) {
 			fs.MkdirAll(oldDir, 0755)
 
 			fileContents := make(map[string][]byte)
-			for i := 0; i < numFiles; i++ {
+			for i := range numFiles {
 				fileName := fmt.Sprintf("file%d.txt", i)
 				content := []byte(fmt.Sprintf("content %d", i))
 				fs.WriteFile(oldDir+"/"+fileName, content, 0644)
@@ -907,7 +871,7 @@ func TestProperty_FileDeletionCorrectness(t *testing.T) {
 			fs.MkdirAll(dirPath, 0755)
 
 			filePaths := make([]string, numFiles)
-			for i := 0; i < numFiles; i++ {
+			for i := range numFiles {
 				filePath := fmt.Sprintf("%s/file%d.txt", dirPath, i)
 				fs.WriteFile(filePath, []byte("content"), 0644)
 				filePaths[i] = filePath

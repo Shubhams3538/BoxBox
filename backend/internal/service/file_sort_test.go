@@ -8,69 +8,38 @@ import (
 	"testing"
 )
 
-// referenceSortEntries is the comparator sortEntries replaced, kept as the oracle for ordering.
-func referenceSortEntries(entries []fs.DirEntry, sortBy, sortDir string) {
-	infos := make(map[string]fs.FileInfo, len(entries))
-	if sortBy == "size" || sortBy == "modTime" {
-		for _, entry := range entries {
-			if info, err := entry.Info(); err == nil {
-				infos[entry.Name()] = info
-			}
-		}
-	}
-	lessFor := func(entry fs.DirEntry) fs.FileInfo {
-		if info, ok := infos[entry.Name()]; ok {
-			return info
-		}
-		info, _ := entry.Info()
-		return info
-	}
+// referenceSortEntries remains a simple ordering oracle for sortEntries.
+func referenceSortEntries(entries []fs.FileInfo, sortBy, sortDir string) {
 	sort.Slice(entries, func(i, j int) bool {
-		iName := entries[i].Name()
-		jName := entries[j].Name()
-		iHidden := strings.HasPrefix(iName, ".")
-		jHidden := strings.HasPrefix(jName, ".")
+		left := entries[i]
+		right := entries[j]
+		leftName := left.Name()
+		rightName := right.Name()
+		leftHidden := strings.HasPrefix(leftName, ".")
+		rightHidden := strings.HasPrefix(rightName, ".")
 
-		if iHidden != jHidden {
-			return !iHidden
+		if leftHidden != rightHidden {
+			return !leftHidden
 		}
 
 		comparison := 0
 		switch sortBy {
 		case "name":
-			comparison = strings.Compare(strings.ToLower(iName), strings.ToLower(jName))
+			comparison = strings.Compare(strings.ToLower(leftName), strings.ToLower(rightName))
 		case "size":
-			iInfo := lessFor(entries[i])
-			jInfo := lessFor(entries[j])
-			iSize := int64(0)
-			jSize := int64(0)
-			if iInfo != nil {
-				iSize = iInfo.Size()
-			}
-			if jInfo != nil {
-				jSize = jInfo.Size()
-			}
-			comparison = compareInt64(iSize, jSize)
+			comparison = compareInt64(left.Size(), right.Size())
 		case "modTime":
-			iInfo := lessFor(entries[i])
-			jInfo := lessFor(entries[j])
-			if iInfo != nil && jInfo != nil {
-				comparison = iInfo.ModTime().Compare(jInfo.ModTime())
-			}
+			comparison = left.ModTime().Compare(right.ModTime())
 		case "type":
-			// Directories first, then by name
-			iDir := entries[i].IsDir()
-			jDir := entries[j].IsDir()
-			if iDir != jDir {
-				return iDir
-			} else {
-				comparison = strings.Compare(strings.ToLower(iName), strings.ToLower(jName))
+			if left.IsDir() != right.IsDir() {
+				return left.IsDir()
 			}
+			comparison = strings.Compare(strings.ToLower(leftName), strings.ToLower(rightName))
 		default:
-			comparison = strings.Compare(strings.ToLower(iName), strings.ToLower(jName))
+			comparison = strings.Compare(strings.ToLower(leftName), strings.ToLower(rightName))
 		}
 		if comparison == 0 {
-			comparison = strings.Compare(strings.ToLower(iName), strings.ToLower(jName))
+			comparison = strings.Compare(strings.ToLower(leftName), strings.ToLower(rightName))
 		}
 
 		if sortDir == "desc" {
@@ -97,15 +66,15 @@ func TestSortEntriesKeepsTheReferenceOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	entries, err := fsys.ReadDir(dir)
+	entries, _, err := fsys.ReadDirFileInfoLimit(dir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for _, sortBy := range []string{"name", "type", "size", "modTime", ""} {
 		for _, sortDir := range []string{"asc", "desc"} {
-			want := append([]fs.DirEntry(nil), entries...)
-			got := append([]fs.DirEntry(nil), entries...)
+			want := append([]fs.FileInfo(nil), entries...)
+			got := append([]fs.FileInfo(nil), entries...)
 			referenceSortEntries(want, sortBy, sortDir)
 			svc.(*fileService).sortEntries(got, sortBy, sortDir)
 			for i := range want {
@@ -115,5 +84,4 @@ func TestSortEntriesKeepsTheReferenceOrder(t *testing.T) {
 			}
 		}
 	}
-
 }

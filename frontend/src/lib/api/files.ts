@@ -19,14 +19,11 @@ export interface FileInfo {
 }
 
 /**
- * Paginated file list response
+ * Full file list response
  */
 export interface FileList {
 	path: string;
 	items: FileInfo[];
-	totalCount: number;
-	page: number;
-	pageSize: number;
 }
 
 /**
@@ -75,8 +72,6 @@ export interface DriveStatsResponse {
  * Options for listing directory contents
  */
 export interface ListOptions {
-	page?: number;
-	pageSize?: number;
 	sortBy?: 'name' | 'size' | 'modTime' | 'type';
 	sortDir?: 'asc' | 'desc';
 	filter?: string;
@@ -155,8 +150,6 @@ export async function getPath(
 	const params: Record<string, string | number | boolean | undefined> = {};
 
 	if (options) {
-		if (options.page !== undefined) params.page = options.page;
-		if (options.pageSize !== undefined) params.pageSize = options.pageSize;
 		if (options.sortBy) params.sortBy = options.sortBy;
 		if (options.sortDir) params.sortDir = options.sortDir;
 		if (options.filter) params.filter = options.filter;
@@ -168,8 +161,6 @@ export async function getPath(
 
 function listRequest(path: string, options?: ListOptions) {
 	const params: Record<string, string | number | boolean | undefined> = {};
-	if (options?.page !== undefined) params.page = options.page;
-	if (options?.pageSize !== undefined) params.pageSize = options.pageSize;
 	if (options?.sortBy) params.sortBy = options.sortBy;
 	if (options?.sortDir) params.sortDir = options.sortDir;
 	if (options?.filter) params.filter = options.filter;
@@ -178,7 +169,7 @@ function listRequest(path: string, options?: ListOptions) {
 }
 
 /**
- * List directory contents with pagination
+ * List all directory contents
  * Returns FileList for directories
  */
 export async function listDirectory(
