@@ -21,7 +21,6 @@ interface RowGeometry {
 }
 
 export function createFixedRowWindow<T>(options: FixedRowWindowOptions<T>) {
-	const overscan = 5;
 	let scrollTop = $state(0);
 	let viewportHeight = $state(0);
 	let viewportWidth = $state(0);
@@ -48,6 +47,9 @@ export function createFixedRowWindow<T>(options: FixedRowWindowOptions<T>) {
 		const bottom = Math.max(0, scrollTop + viewportHeight - options.itemOffset());
 		return Math.min(rowCount, Math.max(firstVisibleRow, Math.ceil(bottom / height)));
 	});
+	// About five items beyond each edge: five list rows, but one row of a wide grid, so a grid
+	// stays under the same element budget as the list.
+	const overscan = $derived(Math.max(1, Math.ceil(5 / columnCount)));
 	const firstRow = $derived(Math.max(0, firstVisibleRow - overscan));
 	const lastRow = $derived(Math.min(rowCount, lastVisibleRow + overscan));
 	const visibleRows = $derived.by(() => {
