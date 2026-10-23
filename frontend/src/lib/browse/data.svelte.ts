@@ -4,7 +4,7 @@ import {
 	listRoots,
 	search,
 	type DriveStatsResponse,
-	type ListOptions,
+	type FileInfo,
 	type RootsResponse,
 	type SearchResponse
 } from '#lib/api/files.js';
@@ -13,6 +13,7 @@ import { fileQueryKeys } from '#lib/stores/files.js';
 import { settingsStore } from '#lib/stores/settings.svelte.js';
 import { canPreview } from '#lib/utils/fileTypes.js';
 import { directoryQueryOptions } from './directoryQuery';
+import { sortFiles } from './sortFiles';
 import type { BrowseLocation } from './location.svelte';
 
 /**
@@ -22,12 +23,6 @@ import type { BrowseLocation } from './location.svelte';
 export function useBrowseData(location: BrowseLocation) {
 	const queryClient = useQueryClient();
 	const settings = $derived(settingsStore.current);
-
-	const directoryOptions = $derived<ListOptions>({
-		sortBy: location.sortBy,
-		sortDir: location.sortDir,
-		includeHidden: settings.showHiddenFiles
-	});
 
 	const rootsQuery = createQuery<RootsResponse>(() => ({
 		queryKey: fileQueryKeys.roots(),
@@ -41,7 +36,7 @@ export function useBrowseData(location: BrowseLocation) {
 	}));
 
 	const directoryQuery = createQuery(() => ({
-		...directoryQueryOptions(location.path, directoryOptions),
+		...directoryQueryOptions(location.path),
 		enabled: location.path !== ''
 	}));
 	const searchQueryResult = createQuery<SearchResponse>(() => ({
@@ -57,10 +52,13 @@ export function useBrowseData(location: BrowseLocation) {
 	const searchResults = $derived(searchQueryResult.data?.results ?? []);
 
 	const displayItems = $derived.by(() => {
-		if (!location.isSearchActive) return directoryItems;
-		return settings.showHiddenFiles
-			? searchResults
-			: searchResults.filter((item) => !item.name.startsWith('.'));
+		const items: FileInfo[] = location.isSearchActive ? searchResults : directoryItems;
+		const visible = settings.showHiddenFiles
+			? items
+			: items.filter((item) => !item.name.startsWith('.'));
+		return location.isSearchActive
+			? visible
+			: sortFiles(visible, location.sortBy, location.sortDir);
 	});
 
 	const currentMount = $derived(
@@ -128,7 +126,7 @@ export function useBrowseData(location: BrowseLocation) {
 		/** Warms a folder the user is about to open. Skips folders loaded moments ago. */
 		prefetchDirectory(path: string) {
 			void queryClient.prefetchQuery({
-				...directoryQueryOptions(path, directoryOptions),
+				...directoryQueryOptions(path),
 				staleTime: CONFIG.query.prefetchStaleTimeMs
 			});
 		},

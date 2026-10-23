@@ -13,27 +13,10 @@ type FileInfo struct {
 	MimeType    string    `json:"mimeType,omitempty"`
 }
 
-// FileList represents the files and directories in a directory
+// FileList is every entry of one directory, unsorted
 type FileList struct {
 	Path  string     `json:"path"`
 	Items []FileInfo `json:"items"`
-}
-
-// ListOptions contains options for listing directory contents
-type ListOptions struct {
-	SortBy        string `json:"sortBy"`
-	SortDir       string `json:"sortDir"`
-	Filter        string `json:"filter"`
-	IncludeHidden bool   `json:"includeHidden"`
-}
-
-// DefaultListOptions returns sensible defaults for listing
-func DefaultListOptions() ListOptions {
-	return ListOptions{
-		SortBy:        "name",
-		SortDir:       "asc",
-		IncludeHidden: true,
-	}
 }
 
 // DriveStats represents disk usage statistics for a mount point

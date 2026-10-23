@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -51,8 +52,8 @@ func TestDirectoryListingEndpointsReturnCompleteRefreshableResults(t *testing.T)
 	}
 
 	endpoints := []string{
-		"/api/v1/files/list/media/listing?sortBy=name&sortDir=asc",
-		"/api/v1/files/media/listing?sortBy=name&sortDir=asc",
+		"/api/v1/files/list/media/listing",
+		"/api/v1/files/media/listing",
 	}
 	getListing := func(endpoint string) model.FileList {
 		rec := httptest.NewRecorder()
@@ -81,9 +82,10 @@ func TestDirectoryListingEndpointsReturnCompleteRefreshableResults(t *testing.T)
 		if listing.Path != "media/listing" || len(listing.Items) != 75 {
 			t.Fatalf("initial listing = path %q, %d items; want media/listing and 75", listing.Path, len(listing.Items))
 		}
-		for i, item := range listing.Items {
-			if want := fmt.Sprintf("file%03d.txt", i); item.Name != want {
-				t.Fatalf("initial item %d = %q, want %q", i, item.Name, want)
+		// The server sends directory order; the client sorts.
+		for i, name := range sortedNames(listing) {
+			if want := fmt.Sprintf("file%03d.txt", i); name != want {
+				t.Fatalf("initial item %d = %q, want %q", i, name, want)
 			}
 		}
 	}
@@ -96,10 +98,20 @@ func TestDirectoryListingEndpointsReturnCompleteRefreshableResults(t *testing.T)
 		if listing.Path != "media/listing" || len(listing.Items) != 76 {
 			t.Fatalf("refreshed listing = path %q, %d items; want media/listing and 76", listing.Path, len(listing.Items))
 		}
-		if got := listing.Items[len(listing.Items)-1].Name; got != "file075.txt" {
+		names := sortedNames(listing)
+		if got := names[len(names)-1]; got != "file075.txt" {
 			t.Fatalf("refreshed final item = %q, want file075.txt", got)
 		}
 	}
+}
+
+func sortedNames(listing model.FileList) []string {
+	names := make([]string, 0, len(listing.Items))
+	for _, item := range listing.Items {
+		names = append(names, item.Name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func TestCreateItemCreatesFileViaAPI(t *testing.T) {

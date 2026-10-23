@@ -69,16 +69,6 @@ export interface DriveStatsResponse {
 }
 
 /**
- * Options for listing directory contents
- */
-export interface ListOptions {
-	sortBy?: 'name' | 'size' | 'modTime' | 'type';
-	sortDir?: 'asc' | 'desc';
-	filter?: string;
-	includeHidden?: boolean;
-}
-
-/**
  * Search results response
  */
 export interface SearchResponse {
@@ -138,53 +128,18 @@ export async function getDriveStats(): Promise<DriveStatsResponse> {
 	return api.get<DriveStatsResponse>('/files/stats');
 }
 
-/**
- * List directory contents or get file info
- * GET /api/v1/files/*path
- */
-export async function getPath(
-	path: string,
-	options?: ListOptions,
-	signal?: AbortSignal
-): Promise<FileList | FileInfo> {
-	const params: Record<string, string | number | boolean | undefined> = {};
-
-	if (options) {
-		if (options.sortBy) params.sortBy = options.sortBy;
-		if (options.sortDir) params.sortDir = options.sortDir;
-		if (options.filter) params.filter = options.filter;
-		if (options.includeHidden !== undefined) params.includeHidden = options.includeHidden;
-	}
-
-	return api.get<FileList | FileInfo>(`/files/${encodeRoutePath(path)}`, params, signal);
+function listEndpoint(path: string): string {
+	return `/files/list/${encodeRoutePath(path)}`;
 }
 
-function listRequest(path: string, options?: ListOptions) {
-	const params: Record<string, string | number | boolean | undefined> = {};
-	if (options?.sortBy) params.sortBy = options.sortBy;
-	if (options?.sortDir) params.sortDir = options.sortDir;
-	if (options?.filter) params.filter = options.filter;
-	if (options?.includeHidden !== undefined) params.includeHidden = options.includeHidden;
-	return { endpoint: `/files/list/${encodeRoutePath(path)}`, params };
-}
-
-/**
- * List all directory contents
- * Returns FileList for directories
- */
-export async function listDirectory(
-	path: string,
-	options?: ListOptions,
-	signal?: AbortSignal
-): Promise<FileList> {
-	const { endpoint, params } = listRequest(path, options);
-	return api.get<FileList>(endpoint, params, signal);
+/** Every entry of a directory in one response. The client sorts and filters. */
+export async function listDirectory(path: string, signal?: AbortSignal): Promise<FileList> {
+	return api.get<FileList>(listEndpoint(path), undefined, signal);
 }
 
 /** The URL `listDirectory` requests. static/early-fetch.js must start the same one. */
-export function directoryUrl(path: string, options?: ListOptions): string {
-	const { endpoint, params } = listRequest(path, options);
-	return buildUrl(endpoint, params);
+export function directoryUrl(path: string): string {
+	return buildUrl(listEndpoint(path));
 }
 
 /**
@@ -192,7 +147,7 @@ export function directoryUrl(path: string, options?: ListOptions): string {
  * Returns FileInfo
  */
 export async function getFileInfo(path: string): Promise<FileInfo> {
-	return getPath(path) as Promise<FileInfo>;
+	return api.get<FileInfo>(`/files/${encodeRoutePath(path)}`);
 }
 
 /**

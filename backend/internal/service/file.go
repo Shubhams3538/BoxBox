@@ -8,8 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 	"uuid"
 
 	"github.com/jR4dh3y/BoxBox/backend/internal/model"
@@ -45,7 +43,7 @@ type WriteFile interface {
 // DirectoryReader contains read-only directory operations.
 type DirectoryReader interface {
 	// List returns all files in a directory, subject to the server entry limit.
-	List(ctx context.Context, path string, opts model.ListOptions) (*model.FileList, error)
+	List(ctx context.Context, path string) (*model.FileList, error)
 	// GetInfo returns metadata for a file or directory
 	GetInfo(ctx context.Context, path string) (*model.FileInfo, error)
 	// ListMountPoints returns all configured mount points
@@ -159,17 +157,11 @@ func (s *fileService) ResolveForWrite(path string) (*model.MountPoint, string, e
 	return s.mounts.resolve(path, writeMaybeMissing)
 }
 
-// List returns all files in a directory, subject to the server entry limit.
-func (s *fileService) List(ctx context.Context, path string, opts model.ListOptions) (*model.FileList, error) {
+// List returns every entry of a directory, hidden ones included, in directory order, subject to
+// the server entry limit. The client sorts and filters, so one read serves every view of the folder.
+func (s *fileService) List(ctx context.Context, path string) (*model.FileList, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-
-	if opts.SortBy == "" {
-		opts.SortBy = "name"
-	}
-	if opts.SortDir == "" {
-		opts.SortDir = "asc"
 	}
 
 	// Resolve the path to filesystem path
@@ -205,30 +197,10 @@ func (s *fileService) List(ctx context.Context, path string, opts model.ListOpti
 		return nil, err
 	}
 
-	filtered := entries[:0]
-	filterLower := strings.ToLower(opts.Filter)
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		name := entry.Name()
-		if !opts.IncludeHidden && strings.HasPrefix(name, ".") {
-			continue
-		}
-		if opts.Filter == "" || containsFold(name, filterLower) {
-			filtered = append(filtered, entry)
-		}
-	}
-
-	s.sortEntries(filtered, opts.SortBy, opts.SortDir)
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	items := make([]model.FileInfo, 0, len(filtered))
+	items := make([]model.FileInfo, 0, len(entries))
 	modeStrings := make(map[fs.FileMode]string)
 	parentPath := filepath.Clean(path)
-	for _, entry := range filtered {
+	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -479,44 +451,6 @@ func (s *fileService) GetFilesystem() filesystem.FS {
 	return s.fs
 }
 
-// sortEntries orders visible entries before hidden entries and then by the requested field.
-func (s *fileService) sortEntries(entries []fs.FileInfo, sortBy, sortDir string) {
-	slices.SortFunc(entries, func(a, b fs.FileInfo) int {
-		aName := a.Name()
-		bName := b.Name()
-		aHidden := strings.HasPrefix(aName, ".")
-		bHidden := strings.HasPrefix(bName, ".")
-		if aHidden != bHidden {
-			if aHidden {
-				return 1
-			}
-			return -1
-		}
-
-		comparison := 0
-		switch sortBy {
-		case "size":
-			comparison = compareInt64(a.Size(), b.Size())
-		case "modTime":
-			comparison = a.ModTime().Compare(b.ModTime())
-		case "type":
-			if a.IsDir() != b.IsDir() {
-				if a.IsDir() {
-					return -1
-				}
-				return 1
-			}
-		}
-		if comparison == 0 {
-			comparison = compareFold(aName, bName)
-		}
-		if sortDir == "desc" {
-			return -comparison
-		}
-		return comparison
-	})
-}
-
 func joinListingPath(parent, name string) string {
 	if parent == "." {
 		return name
@@ -525,15 +459,4 @@ func joinListingPath(parent, name string) string {
 		return parent + name
 	}
 	return parent + string(filepath.Separator) + name
-}
-
-func compareInt64(left, right int64) int {
-	switch {
-	case left < right:
-		return -1
-	case left > right:
-		return 1
-	default:
-		return 0
-	}
 }

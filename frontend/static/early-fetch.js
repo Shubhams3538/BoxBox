@@ -10,27 +10,10 @@
 	const path = (searchParams.get('path') ?? '').replace(/^\/+|\/+$/g, '');
 	if (pathname !== '/browse' || !path) return;
 
-	let settings = {};
-	try {
-		settings = JSON.parse(localStorage.getItem('boxbox_settings')) ?? {};
-	} catch {
-		// Unreadable settings: use the defaults, as the app does.
-	}
-	const sort = searchParams.get('sort');
-	const dir = searchParams.get('dir');
 	const url = new URL(
 		`/api/v1/files/list/${path.split('/').map(encodeURIComponent).join('/')}`,
 		location.origin
 	);
-	url.searchParams.append(
-		'sortBy',
-		['name', 'size', 'modTime', 'type'].includes(sort) ? sort : (settings.defaultSortBy ?? 'name')
-	);
-	url.searchParams.append(
-		'sortDir',
-		dir === 'asc' || dir === 'desc' ? dir : (settings.defaultSortDir ?? 'asc')
-	);
-	url.searchParams.append('includeHidden', settings.showHiddenFiles ?? false);
 
 	const list = (token) =>
 		fetch(url, {

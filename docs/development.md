@@ -135,7 +135,7 @@ Directory listing and search cost are tracked by `BenchmarkListDirectory` and `B
 
 Cached folder listings are shown at once but never trusted: an open folder always revalidates (`directoryQueryOptions`), and a finished copy, move or delete job invalidates every cached listing and drive stat. A job that ends while the WebSocket is down is caught when it reconnects, because the client reloads the job list then. The server does not push file changes, so a change made outside BoxBox appears on the next open or refresh.
 
-Folder listings are complete responses, not pages. `fixedRowWindow.svelte.ts`
+Folder listings are complete, unsorted responses, not pages; one cached listing per folder serves every sort and the hidden-file toggle, so changing them sends no request. `fixedRowWindow.svelte.ts`
 renders a bounded window for both list and grid, while selection and actions use
 the complete collection. Its scroll anchors are bounded and keyed by folder,
 search, sort, view, and hidden-file setting. The 10,000-entry server limit still

@@ -25,6 +25,9 @@ func newCompressionTestServer(t *testing.T) http.Handler {
 			t.Fatal(err)
 		}
 	}
+	if err := os.Mkdir(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cfg := &model.ServerConfig{
 		Host:        "127.0.0.1",
 		MaxUploadMB: 10,
@@ -123,9 +126,9 @@ func TestFileDownloadsAreNotRecompressed(t *testing.T) {
 
 func TestSmallResponsesOnCompressedRoutesAreNotGzipped(t *testing.T) {
 	handler := newCompressionTestServer(t)
-	// A filtered listing with no matches and a search with no matches both stay small.
+	// An empty folder's listing and a search with no matches both stay small.
 	for _, target := range []string{
-		"/api/v1/files/list/files?filter=zzzzzz",
+		"/api/v1/files/list/files/empty",
 		"/api/v1/search?path=files&q=zzzzzz",
 	} {
 		plain := get(handler, target, "")

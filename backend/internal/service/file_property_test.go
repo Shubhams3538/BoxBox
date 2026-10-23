@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/jR4dh3y/BoxBox/backend/internal/model"
@@ -45,50 +45,7 @@ func (f truncatedDirectoryListingFS) ReadDirFileInfoLimit(_ string, limit int) (
 	return nil, true, nil
 }
 
-func TestDirectoryListingSortsVisibleItemsBeforeHiddenItems(t *testing.T) {
-	svc, fs := setupTestFileService()
-	ctx := context.Background()
-
-	testDir := "/data/media/hidden-first"
-	if err := fs.MkdirAll(testDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	for i := range 20 {
-		if err := fs.WriteFile(fmt.Sprintf("%s/.hidden%02d", testDir, i), []byte("content"), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, name := range []string{"Desktop", "Documents", "Downloads"} {
-		if err := fs.MkdirAll(testDir+"/"+name, 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	list, err := svc.List(ctx, "media/hidden-first", model.ListOptions{
-		SortBy:        "name",
-		SortDir:       "asc",
-		IncludeHidden: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list.Items) != 23 {
-		t.Fatalf("got %d items, want 23", len(list.Items))
-	}
-
-	got := make([]string, 0, len(list.Items))
-	for _, item := range list.Items {
-		got = append(got, item.Name)
-	}
-
-	want := []string{"Desktop", "Documents", "Downloads"}
-	if fmt.Sprint(got[:len(want)]) != fmt.Sprint(want) {
-		t.Fatalf("visible items should sort before hidden items: want %v, got %v", want, got[:len(want)])
-	}
-}
-
-func TestDirectoryListingCanExcludeHiddenItems(t *testing.T) {
+func TestDirectoryListingReturnsHiddenAndVisibleEntries(t *testing.T) {
 	svc, fs := setupTestFileService()
 	ctx := context.Background()
 
@@ -96,44 +53,71 @@ func TestDirectoryListingCanExcludeHiddenItems(t *testing.T) {
 	if err := fs.MkdirAll(testDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-
-	for _, name := range []string{"alpha.txt", "beta.txt", ".env", ".cache"} {
+	want := []string{".cache", ".env", "alpha.txt", "beta.txt"}
+	for _, name := range want {
 		if err := fs.WriteFile(testDir+"/"+name, []byte("content"), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	list, err := svc.List(ctx, "media/visible-count", model.ListOptions{
-		SortBy:        "name",
-		SortDir:       "asc",
-		IncludeHidden: false,
-	})
+	list, err := svc.List(ctx, "media/visible-count")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if len(list.Items) != 2 {
-		t.Fatalf("expected only 2 visible items, got %d", len(list.Items))
-	}
-
+	got := make([]string, 0, len(list.Items))
 	for _, item := range list.Items {
-		if strings.HasPrefix(item.Name, ".") {
-			t.Fatalf("hidden item was not excluded: %q", item.Name)
+		got = append(got, item.Name)
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("listing = %v, want %v", got, want)
+	}
+}
+
+func TestListReadsTheDirectoryOnce(t *testing.T) {
+	memory := filesystem.NewMemMapFS()
+	if err := memory.MkdirAll("/data/media/big", 0755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 500 {
+		if err := memory.WriteFile(fmt.Sprintf("/data/media/big/file%03d.txt", i), nil, 0644); err != nil {
+			t.Fatal(err)
 		}
 	}
+	counting := &readCountingFS{FS: memory}
+	svc := NewFileService(counting, FileServiceConfig{MountPoints: []model.MountPoint{{Name: "media", Path: "/data/media"}}})
 
-	list, err = svc.List(ctx, "media/visible-count", model.ListOptions{
-		SortBy:        "name",
-		SortDir:       "asc",
-		IncludeHidden: true,
-	})
+	list, err := svc.List(context.Background(), "media/big")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if len(list.Items) != 4 {
-		t.Fatalf("expected hidden items when enabled, got %d", len(list.Items))
+	if len(list.Items) != 500 {
+		t.Fatalf("listing has %d items, want 500", len(list.Items))
 	}
+	if counting.reads != 1 {
+		t.Fatalf("opening a folder read it %d times, want 1", counting.reads)
+	}
+}
+
+// readCountingFS counts directory reads so a test can pin how often a folder open touches the disk.
+type readCountingFS struct {
+	filesystem.FS
+	reads int
+}
+
+func (c *readCountingFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	c.reads++
+	return c.FS.ReadDir(name)
+}
+
+func (c *readCountingFS) ReadDirLimit(name string, limit int) ([]fs.DirEntry, bool, error) {
+	c.reads++
+	return c.FS.ReadDirLimit(name, limit)
+}
+
+func (c *readCountingFS) ReadDirFileInfoLimit(name string, limit int) ([]fs.FileInfo, bool, error) {
+	c.reads++
+	return c.FS.ReadDirFileInfoLimit(name, limit)
 }
 
 func TestDirectoryListingHonorsCanceledContext(t *testing.T) {
@@ -141,7 +125,7 @@ func TestDirectoryListingHonorsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := svc.List(ctx, "media/canceled", model.DefaultListOptions()); !errors.Is(err, context.Canceled) {
+	if _, err := svc.List(ctx, "media/canceled"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("List error = %v, want context.Canceled", err)
 	}
 }
@@ -155,7 +139,7 @@ func TestDirectoryListingEnforcesEntryLimit(t *testing.T) {
 		MountPoints: []model.MountPoint{{Name: "media", Path: "/data/media"}},
 	})
 
-	if _, err := svc.List(context.Background(), "media/large", model.DefaultListOptions()); !errors.Is(err, ErrDirectoryTooLarge) {
+	if _, err := svc.List(context.Background(), "media/large"); !errors.Is(err, ErrDirectoryTooLarge) {
 		t.Fatalf("List error = %v, want ErrDirectoryTooLarge", err)
 	}
 }
@@ -263,7 +247,7 @@ func TestProperty_DirectoryListingMetadataCompleteness(t *testing.T) {
 			fs.MkdirAll(testDir+"/subdir", 0755)
 
 			// List the directory
-			list, err := svc.List(ctx, "media/testdir", model.DefaultListOptions())
+			list, err := svc.List(ctx, "media/testdir")
 			if err != nil {
 				return false
 			}
@@ -328,7 +312,7 @@ func TestProperty_DirectoryListingMetadataCompleteness(t *testing.T) {
 			fs.MkdirAll(testDir+"/"+fileName+"_dir", 0755)
 
 			// List and verify
-			list, err := svc.List(ctx, "media/flagtest", model.DefaultListOptions())
+			list, err := svc.List(ctx, "media/flagtest")
 			if err != nil {
 				return false
 			}
@@ -373,7 +357,7 @@ func TestProperty_DirectoryListingCompletenessAndRefresh(t *testing.T) {
 				}
 			}
 
-			list, err := svc.List(context.Background(), "media/complete", model.DefaultListOptions())
+			list, err := svc.List(context.Background(), "media/complete")
 			if err != nil || len(list.Items) != numFiles {
 				return false
 			}
@@ -402,14 +386,14 @@ func TestProperty_DirectoryListingCompletenessAndRefresh(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			before, err := svc.List(ctx, "media/refresh", model.DefaultListOptions())
+			before, err := svc.List(ctx, "media/refresh")
 			if err != nil || len(before.Items) != numFiles {
 				return false
 			}
 			if err := fs.WriteFile(testDir+"/zz-refresh.txt", []byte("content"), 0644); err != nil {
 				return false
 			}
-			after, err := svc.List(ctx, "media/refresh", model.DefaultListOptions())
+			after, err := svc.List(ctx, "media/refresh")
 			return err == nil &&
 				len(before.Items) == numFiles &&
 				len(after.Items) == numFiles+1 &&
@@ -454,7 +438,7 @@ func TestProperty_NonExistentPathReturnsError(t *testing.T) {
 			path += "/nonexistent_" + fmt.Sprintf("%d", numSegments)
 
 			// Try to list the non-existent path
-			_, err := svc.List(ctx, path, model.DefaultListOptions())
+			_, err := svc.List(ctx, path)
 
 			// Should return ErrPathNotFound
 			return err == ErrPathNotFound
@@ -501,7 +485,7 @@ func TestProperty_NonExistentPathReturnsError(t *testing.T) {
 			fs.MkdirAll(testDir, 0755)
 
 			// Try to list it
-			_, err := svc.List(ctx, "media/"+dirName, model.DefaultListOptions())
+			_, err := svc.List(ctx, "media/"+dirName)
 
 			// Should NOT return ErrPathNotFound
 			return err != ErrPathNotFound

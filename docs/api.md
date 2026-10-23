@@ -117,23 +117,14 @@ GET /api/v1/files/stats
 ### List a Directory
 
 ```http
-GET /api/v1/files/list/{path}?sortBy=name&sortDir=asc&filter=log
+GET /api/v1/files/list/{path}
 ```
 
 `{path}` starts with the mount name, for example `home/projects`.
 
-The response contains the complete matching listing in one request. Refresh replaces
-that listing rather than appending pages. Directories with more than 10,000 entries
-return `413`, even if a filter would match fewer entries.
-
-Query options:
-
-| Name | Default | Notes |
-| --- | --- | --- |
-| `sortBy` | `name` | `name`, `size`, `modTime`, or `type`. |
-| `sortDir` | `asc` | `asc` or `desc`. |
-| `filter` | empty | Name contains filter. |
-| `includeHidden` | `true` | Include names beginning with a dot. |
+The response contains every entry of the directory in one request, hidden entries included,
+in no particular order. Clients sort and filter it. Refresh replaces that listing rather than
+appending pages. Directories with more than 10,000 entries return `413`.
 
 Response:
 

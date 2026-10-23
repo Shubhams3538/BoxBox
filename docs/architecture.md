@@ -55,9 +55,9 @@ GET /api/v1/files/list/home/projects
   -> filesystem abstraction
 ```
 
-Directory responses contain the complete matching listing, up to the 10,000-entry
-safety limit. The browser keeps one query result per folder/options key and renders
-only a visible window of list rows or grid tiles. Refresh replaces the collection;
+Directory responses contain every entry, unsorted, up to the 10,000-entry safety
+limit. The browser keeps one query result per folder, sorts and filters it locally
+(`sortFiles.ts`), and renders only a visible window of list rows or grid tiles. Refresh replaces the collection;
 it never combines pages from different filesystem states. Scroll anchors use file
 paths and survive folder navigation and view changes.
 
