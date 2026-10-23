@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Folder, Home, Loader2 } from 'lucide-svelte';
 	import { onDestroy, tick } from 'svelte';
-	import { sortFiles } from '#lib/browse/sortFiles.js';
+	import { suggestedDirectories } from '#lib/browse/pathSuggestions.js';
 	import { listDirectory, listRoots } from '#lib/api/files.js';
 
 	interface PathSuggestion {
@@ -212,12 +212,7 @@
 		prefix: string
 	): Promise<PathSuggestion[]> {
 		const response = await listDirectory(parentPath);
-		const includeHidden = includeHiddenSuggestions || prefix.startsWith('.');
-		const directories = sortFiles(
-			response.items.filter((item) => item.isDir && (includeHidden || !item.name.startsWith('.'))),
-			'name',
-			'asc'
-		);
+		const directories = suggestedDirectories(response.items, prefix, includeHiddenSuggestions);
 		return filterSuggestions(directories, parentPath, prefix);
 	}
 

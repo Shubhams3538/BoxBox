@@ -10,7 +10,7 @@
 		Upload
 	} from 'lucide-svelte';
 	import { Button, Modal, ProgressBar, Select } from '#lib/components/ui/index.js';
-	import { sortFiles } from '#lib/browse/sortFiles.js';
+	import { visibleByName } from '#lib/browse/sortFiles.js';
 	import { listDirectory, listRoots, type FileInfo, type MountPoint } from '#lib/api/files.js';
 	import { resolveBackgroundImage, toServerBackgroundImage } from '#lib/utils/appearance.js';
 	import { formatFileSize } from '#lib/utils/format.js';
@@ -119,10 +119,7 @@
 
 		try {
 			const response = await listDirectory(path);
-			const visible = showHiddenFiles
-				? response.items
-				: response.items.filter((item) => !item.name.startsWith('.'));
-			serverWallpaperItems = sortFiles(visible, 'name', 'asc').slice(
+			serverWallpaperItems = visibleByName(response.items, showHiddenFiles).slice(
 				0,
 				SERVER_WALLPAPER_ITEMS_LIMIT
 			);
