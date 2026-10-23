@@ -9,7 +9,7 @@ export async function verifyNavigation(
 	credentials: { username: string; password: string },
 	mount: string
 ) {
-	// Add navigation fixtures after timing samples so they cannot change the measured first page.
+	// Add navigation fixtures after timing samples so they cannot change the measured folder.
 	mkdirSync(join(mount, 'Navigation', 'Child'), { recursive: true });
 	writeFileSync(join(mount, 'Navigation', 'Parent.txt'), 'parent\n');
 	writeFileSync(join(mount, 'Navigation', 'Child', 'Nested.txt'), 'nested\n');

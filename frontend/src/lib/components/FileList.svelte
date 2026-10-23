@@ -7,15 +7,18 @@
 	import type { SortField, SortDir } from '#lib/types/files.js';
 	import { formatFileSize, formatFileDate } from '#lib/utils/format.js';
 	import { getFileTypeDescription, getFileIcon } from '#lib/utils/fileTypes.js';
-	import { getFileContextMenuItems } from '#lib/utils/fileContextMenu.js';
 	import { SvelteSet } from 'svelte/reactivity';
-	import { Spinner, ContextMenu } from '#lib/components/ui/index.js';
+	import { untrack } from 'svelte';
+	import { Spinner } from '#lib/components/ui/index.js';
+	import LoadError from '#lib/components/LoadError.svelte';
 	import { FolderOpen } from 'lucide-svelte';
 	import { CONFIG } from '#lib/config.js';
 	import { createDelayedFlag } from '#lib/utils/delayedFlag.svelte.js';
+	import { createFixedRowWindow } from '#lib/utils/fixedRowWindow.svelte.js';
 
 	let {
 		items = [],
+		viewKey,
 		sortBy = 'name',
 		sortDir = 'asc',
 		emptyMessage = 'This folder is empty',
@@ -35,6 +38,7 @@
 		onContextMenuAction
 	}: {
 		items?: FileInfo[];
+		viewKey: string;
 		sortBy?: SortField;
 		sortDir?: SortDir;
 		emptyMessage?: string;
@@ -56,6 +60,30 @@
 	} = $props();
 
 	const showSpinner = createDelayedFlag(() => isLoading, CONFIG.ui.spinnerDelayMs);
+	const LIST_HEADER_HEIGHT = 38;
+	let tableElement = $state<HTMLTableElement | null>(null);
+	let activeItemPath = $state<string | null>(null);
+	const activeItemIndex = $derived.by(() =>
+		activeItemPath === null ? -1 : items.findIndex((item) => item.path === activeItemPath)
+	);
+	const activeItem = $derived(activeItemIndex < 0 ? null : (items[activeItemIndex] ?? null));
+	const rowWindow = createFixedRowWindow({
+		items: () => items,
+		itemKey: (item) => item.path,
+		viewKey: () => viewKey,
+		isReady: () => !isLoading,
+		rowHeight: () => (compactMode ? 28 : 32),
+		itemOffset: () => LIST_HEADER_HEIGHT,
+		viewportOffset: () => LIST_HEADER_HEIGHT
+	});
+	const attachRowWindow = rowWindow.attach;
+	$effect(() => {
+		const path = activeItemPath;
+		if (path === null || items.some((item) => item.path === path)) return;
+		untrack(() => {
+			activeItemPath = null;
+		});
+	});
 
 	// Context menu state
 	let contextMenu = $state<{ x: number; y: number; items: FileInfo[] } | null>(null);
@@ -70,6 +98,8 @@
 	}
 
 	function handleRowClick(item: FileInfo, event: MouseEvent) {
+		activeItemPath = item.path;
+		focusTable();
 		if (event.ctrlKey || event.metaKey) {
 			const newSelection = new SvelteSet<string>(selectedPaths);
 			if (newSelection.has(item.path)) {
@@ -108,37 +138,120 @@
 		onItemClick?.(item);
 	}
 
-	function handleKeyDown(item: FileInfo, event: KeyboardEvent) {
-		if (event.key === 'Enter' || event.key === ' ') {
+	function focusTable() {
+		tableElement?.focus({ preventScroll: true });
+	}
+
+	function handleTableFocus() {
+		if (items.length === 0 || activeItemPath !== null) return;
+		const firstVisible = Math.min(items.length - 1, rowWindow.firstVisibleRow);
+		activeItemPath = items[firstVisible]?.path ?? null;
+	}
+
+	function handleViewportScroll() {
+		rowWindow.onScroll();
+	}
+
+	function getKeyboardTargetItems(): FileInfo[] {
+		if (selectedPaths.size > 0) {
+			return items.filter((item) => selectedPaths.has(item.path));
+		}
+		return activeItem ? [activeItem] : [];
+	}
+
+	function handleKeyboardContextMenu() {
+		if (!tableElement) return;
+		const targetItems = getKeyboardTargetItems();
+		if (targetItems.length === 0) return;
+
+		const activeIsVisible =
+			activeItemIndex >= rowWindow.firstVisibleRow && activeItemIndex < rowWindow.lastVisibleRow;
+		const activeCell = activeIsVisible
+			? tableElement.querySelector<HTMLElement>(`#file-list-cell-${activeItemIndex}`)
+			: null;
+		const bounds =
+			activeCell?.getBoundingClientRect() ??
+			tableElement.parentElement?.getBoundingClientRect() ??
+			tableElement.getBoundingClientRect();
+		contextMenu = {
+			x: Math.min(Math.max(0, bounds.left), Math.max(0, window.innerWidth - 1)),
+			y: Math.min(Math.max(0, bounds.top), Math.max(0, window.innerHeight - 1)),
+			items: targetItems
+		};
+	}
+
+	function handleGridKeyDown(event: KeyboardEvent) {
+		if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
 			event.preventDefault();
-			onItemClick?.(item);
+			handleKeyboardContextMenu();
 			return;
 		}
 
-		// Match the shortcuts advertised in the context menu (F2, Del, Ctrl/Cmd+C/X/V)
-		const targetItems = selectedPaths.has(item.path)
-			? items.filter((selectedItem) => selectedPaths.has(selectedItem.path))
-			: [item];
+		const target = event.target instanceof HTMLElement ? event.target : null;
+		if (target?.closest('[data-file-header="true"]') || items.length === 0) return;
 
-		if (event.key === 'Delete') {
-			event.preventDefault();
-			onContextMenuAction?.('delete', targetItems);
-		} else if (event.key === 'F2') {
-			event.preventDefault();
-			onContextMenuAction?.('rename', targetItems);
-		} else if ((event.key === 'c' || event.key === 'C') && (event.ctrlKey || event.metaKey)) {
-			event.preventDefault();
-			onContextMenuAction?.('copy', targetItems);
-		} else if ((event.key === 'x' || event.key === 'X') && (event.ctrlKey || event.metaKey)) {
-			event.preventDefault();
-			onContextMenuAction?.('cut', targetItems);
-		} else if ((event.key === 'v' || event.key === 'V') && (event.ctrlKey || event.metaKey)) {
-			event.preventDefault();
-			onContextMenuAction?.('paste', targetItems);
+		const currentIndex = Math.min(
+			items.length - 1,
+			Math.max(0, activeItemIndex >= 0 ? activeItemIndex : rowWindow.firstVisibleRow)
+		);
+		let nextIndex: number;
+
+		switch (event.key) {
+			case 'ArrowDown':
+				nextIndex = Math.min(items.length - 1, currentIndex + 1);
+				break;
+			case 'ArrowUp':
+				nextIndex = Math.max(0, currentIndex - 1);
+				break;
+			case 'PageDown':
+				nextIndex = Math.min(items.length - 1, currentIndex + rowWindow.visibleRowCount);
+				break;
+			case 'PageUp':
+				nextIndex = Math.max(0, currentIndex - rowWindow.visibleRowCount);
+				break;
+			case 'Home':
+				nextIndex = 0;
+				break;
+			case 'End':
+				nextIndex = items.length - 1;
+				break;
+			default: {
+				const item = items[currentIndex];
+				if (!item) return;
+				if (event.key === 'Enter' || event.key === ' ') {
+					event.preventDefault();
+					onItemClick?.(item);
+					return;
+				}
+
+				let action: 'delete' | 'rename' | 'copy' | 'cut' | 'paste' | null = null;
+				if (event.key === 'Delete') action = 'delete';
+				else if (event.key === 'F2') action = 'rename';
+				else if ((event.key === 'c' || event.key === 'C') && (event.ctrlKey || event.metaKey)) {
+					action = 'copy';
+				} else if ((event.key === 'x' || event.key === 'X') && (event.ctrlKey || event.metaKey)) {
+					action = 'cut';
+				} else if ((event.key === 'v' || event.key === 'V') && (event.ctrlKey || event.metaKey)) {
+					action = 'paste';
+				}
+				if (!action) return;
+
+				const targetItems = getKeyboardTargetItems();
+				if (targetItems.length === 0) return;
+				event.preventDefault();
+				onContextMenuAction?.(action, targetItems);
+				return;
+			}
 		}
+
+		event.preventDefault();
+		activeItemPath = items[nextIndex]?.path ?? null;
+		rowWindow.scrollToItem(nextIndex);
 	}
 
 	function handleContextMenu(item: FileInfo, event: MouseEvent) {
+		activeItemPath = item.path;
+		focusTable();
 		event.preventDefault();
 
 		// If right-clicked item is not selected, select only that item
@@ -204,13 +317,20 @@
 	const thClass =
 		'text-left px-3 py-2 bg-surface-secondary border-b border-border-primary font-medium text-text-secondary whitespace-nowrap select-none sticky top-0 z-[5] cursor-pointer transition-colors duration-100 hover:bg-surface-tertiary hover:text-text-primary focus:outline focus:outline-1 focus:outline-accent focus:-outline-offset-1';
 	const thSortedClass = 'text-accent';
-	const tdClass = 'h-8 px-3 py-1.5 align-middle border-b border-border-secondary text-text-primary';
+	const tdClass =
+		'h-[32px] px-3 py-1 align-middle border-b border-border-secondary text-text-primary';
+	const compactTdClass =
+		'h-[28px] px-3 py-0.5 align-middle border-b border-border-secondary text-text-primary';
 	const clippedCellClass = 'block overflow-hidden text-ellipsis whitespace-nowrap';
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="relative h-full w-full overflow-auto bg-surface-primary {compactMode ? 'compact' : ''}"
+	class="relative h-full w-full overflow-auto bg-surface-primary [overflow-anchor:none] {compactMode
+		? 'compact'
+		: ''}"
+	use:attachRowWindow
+	onscroll={handleViewportScroll}
 	oncontextmenu={handleBackgroundContextMenu}
 >
 	{#if showSpinner.value}
@@ -220,9 +340,22 @@
 	{/if}
 
 	<table
+		bind:this={tableElement}
 		class="w-full min-w-[720px] table-fixed border-collapse text-[13px] leading-5"
 		role="grid"
+		tabindex="0"
 		aria-busy={isLoading}
+		aria-rowcount={items.length + (items.length === 0 && !isLoading ? 2 : 1)}
+		aria-colcount="4"
+		aria-multiselectable="true"
+		aria-activedescendant={activeItemIndex >= 0 &&
+		activeItemIndex >= rowWindow.itemStart &&
+		activeItemIndex < rowWindow.itemEnd &&
+		activeItemIndex < items.length
+			? `file-list-cell-${activeItemIndex}`
+			: undefined}
+		onfocusin={handleTableFocus}
+		onkeydown={handleGridKeyDown}
 	>
 		<colgroup>
 			<col />
@@ -231,7 +364,7 @@
 			<col class="w-[168px]" />
 		</colgroup>
 		<thead>
-			<tr>
+			<tr aria-rowindex="1" style="height: 38px">
 				<th
 					class="{thClass} {sortBy === 'name' ? thSortedClass : ''}"
 					onclick={() => handleSort('name')}
@@ -288,7 +421,7 @@
 		</thead>
 		<tbody>
 			{#if items.length === 0 && !isLoading}
-				<tr>
+				<tr aria-rowindex="2">
 					<td colspan="4" class="px-3 py-12">
 						<div class="flex flex-col items-center gap-2 text-text-muted">
 							<FolderOpen size={32} class="opacity-50" />
@@ -297,29 +430,39 @@
 					</td>
 				</tr>
 			{:else}
-				{#each items as item (item.path)}
+				{#if rowWindow.beforeSize > 0}
+					<tr aria-hidden="true" style={`height: ${rowWindow.beforeSize}px`}>
+						<td colspan="4" class="border-0 p-0" style={`height: ${rowWindow.beforeSize}px`}></td>
+					</tr>
+				{/if}
+				{#each items.slice(rowWindow.itemStart, rowWindow.itemEnd) as item, visibleOffset (item.path)}
+					{@const itemIndex = rowWindow.itemStart + visibleOffset}
 					{@const IconComponent = getFileIcon(item.name, item.isDir)}
 					{@const displayName = getDisplayName(item)}
 					{@const typeDescription = item.isDir ? 'Folder' : getFileTypeDescription(item.name)}
 					{@const sizeDescription = item.isDir ? '' : formatFileSize(item.size)}
 					{@const modifiedDescription = formatFileDate(item.modTime)}
 					<tr
-						class="file-list-row cursor-default transition-colors duration-50 hover:bg-surface-secondary focus:bg-selection focus:outline-none {isSelected(
+						style={`height: ${compactMode ? 28 : 32}px`}
+						class="cursor-default transition-colors duration-50 hover:bg-surface-secondary {activeItemIndex ===
+						itemIndex
+							? 'bg-surface-secondary'
+							: ''} {isSelected(item.path) ? 'bg-selection hover:bg-selection-hover' : ''} {isCut(
 							item.path
 						)
-							? 'bg-selection hover:bg-selection-hover'
-							: ''} {isCut(item.path) ? 'opacity-50' : ''}"
+							? 'opacity-50'
+							: ''}"
 						onclick={(e) => handleRowClick(item, e)}
 						onpointerenter={() => item.isDir && onFolderHover?.(item.path)}
 						onpointerleave={() => onFolderHover?.(null)}
-						onkeydown={(e) => handleKeyDown(item, e)}
 						ondblclick={() => handleDoubleClick(item)}
 						oncontextmenu={(e) => handleContextMenu(item, e)}
-						tabindex="0"
+						tabindex="-1"
+						aria-rowindex={itemIndex + 2}
 						aria-selected={isSelected(item.path)}
 						data-file-row="true"
 					>
-						<td class={tdClass}>
+						<td id={`file-list-cell-${itemIndex}`} class={compactMode ? compactTdClass : tdClass}>
 							<div class="flex min-w-0 items-center gap-2">
 								<span
 									class="flex w-5 shrink-0 items-center justify-center {item.isDir
@@ -336,18 +479,27 @@
 								</span>
 							</div>
 						</td>
-						<td class="{tdClass} text-text-secondary">
+						<td class="{compactMode ? compactTdClass : tdClass} text-text-secondary">
 							<span class={clippedCellClass} title={typeDescription}>{typeDescription}</span>
 						</td>
-						<td class="{tdClass} text-right text-text-secondary tabular-nums">
+						<td
+							class="{compactMode
+								? compactTdClass
+								: tdClass} text-right text-text-secondary tabular-nums"
+						>
 							<span class={clippedCellClass} title={sizeDescription}>{sizeDescription}</span>
 						</td>
-						<td class="{tdClass} text-text-secondary">
+						<td class="{compactMode ? compactTdClass : tdClass} text-text-secondary">
 							<span class={clippedCellClass} title={modifiedDescription}>{modifiedDescription}</span
 							>
 						</td>
 					</tr>
 				{/each}
+				{#if rowWindow.afterSize > 0}
+					<tr aria-hidden="true" style={`height: ${rowWindow.afterSize}px`}>
+						<td colspan="4" class="border-0 p-0" style={`height: ${rowWindow.afterSize}px`}></td>
+					</tr>
+				{/if}
 			{/if}
 		</tbody>
 	</table>
@@ -355,23 +507,18 @@
 
 <!-- Context Menu -->
 {#if contextMenu}
-	<ContextMenu
-		items={getFileContextMenuItems({
-			items: contextMenu.items,
-			canPaste,
-			favoritePaths,
-			canCreate
-		})}
-		x={contextMenu.x}
-		y={contextMenu.y}
-		onSelect={handleContextMenuSelect}
-		onClose={handleContextMenuClose}
-	/>
+	{#await import('./FileContextMenu.svelte') then { default: FileContextMenu }}
+		<FileContextMenu
+			items={contextMenu.items}
+			{canPaste}
+			{favoritePaths}
+			{canCreate}
+			x={contextMenu.x}
+			y={contextMenu.y}
+			onSelect={handleContextMenuSelect}
+			onClose={handleContextMenuClose}
+		/>
+	{:catch}
+		<LoadError label="file context menu" onClose={handleContextMenuClose} />
+	{/await}
 {/if}
-
-<style>
-	.file-list-row {
-		content-visibility: auto;
-		contain-intrinsic-size: 32px;
-	}
-</style>
