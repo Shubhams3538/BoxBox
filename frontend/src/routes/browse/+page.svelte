@@ -69,7 +69,7 @@
 	/>
 
 	<!-- Main content area -->
-	<div class="flex min-w-0 flex-1 flex-col">
+	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
 		<!-- Toolbar with navigation and path bar -->
 		<Toolbar
 			pathSegments={location.segments}
@@ -95,7 +95,7 @@
 
 		<!-- File list or Drive cards -->
 		<div
-			class="relative flex-1 overflow-auto"
+			class="relative min-h-0 flex-1 overflow-hidden"
 			ondragover={uploads.handleDragOver}
 			ondragleave={uploads.handleDragLeave}
 			ondrop={uploads.handleDrop}
@@ -115,7 +115,7 @@
 
 			{#if data.isAtRoot}
 				<!-- This Server view - show drive cards -->
-				<div class="p-6">
+				<div class="h-full overflow-auto p-6">
 					{#if data.isLoadingDrives}
 						<div class="flex items-center gap-2 py-5 text-sm text-text-secondary">
 							<Spinner size="sm" />
@@ -131,9 +131,21 @@
 						</div>
 					{/if}
 				</div>
+			{:else if data.fileListError && data.displayItems.length === 0}
+				<div role="alert" class="flex h-full items-center justify-center gap-3 p-6 text-sm">
+					<span>{data.fileListError}</span>
+					<button
+						type="button"
+						class="rounded border border-border-primary px-3 py-1 hover:bg-surface-secondary"
+						onclick={data.reload}
+					>
+						Retry
+					</button>
+				</div>
 			{:else if location.viewMode === 'grid'}
 				{#await import('#lib/components/FileGrid.svelte') then { default: FileGrid }}
 					<FileGrid
+						viewKey={location.viewKey}
 						items={data.displayItems}
 						emptyMessage={data.emptyListMessage}
 						selectedPaths={selection.paths}
@@ -155,6 +167,7 @@
 				{/await}
 			{:else}
 				<FileList
+					viewKey={location.viewKey}
 					items={data.displayItems}
 					sortBy={location.sortBy}
 					sortDir={location.sortDir}
@@ -175,6 +188,15 @@
 					onContextMenuAction={actions.handleContextMenuAction}
 				/>
 			{/if}
+			{#if data.fileListError && data.displayItems.length > 0}
+				<div
+					role="alert"
+					class="absolute top-3 right-3 z-20 flex items-center gap-3 rounded border border-border-primary bg-surface-primary p-3 text-sm"
+				>
+					<span>{data.fileListError}</span>
+					<button type="button" class="underline" onclick={data.reload}>Retry</button>
+				</div>
+			{/if}
 		</div>
 
 		<!-- Status bar -->
@@ -182,10 +204,6 @@
 			itemCount={data.itemCount}
 			selectedCount={selection.count}
 			viewMode={location.viewMode}
-			totalCount={data.statusTotalCount}
-			hasMore={data.hasMoreItems}
-			isLoadingMore={data.isLoadingMore}
-			onLoadMore={data.loadMore}
 			onViewModeChange={location.setViewMode}
 		/>
 	</div>
