@@ -14,7 +14,10 @@ SHARED = {"package.json", "bun.lock", "bun.lockb", "bunfig.toml", ".npmrc", ".bu
 def affected_jobs(paths):
     jobs = set()
     for path in paths:
-        if path in DOCS or path.startswith("docs/"):
+        if path in DOCS:
+            continue
+        if path.startswith("docs/"):
+            jobs.add("website")
             continue
         if path == ".github/workflows/ci.yml" or path.startswith(".github/scripts/"):
             return set(JOBS)

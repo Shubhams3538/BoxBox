@@ -10,7 +10,7 @@ from ci_scope import JOBS, affected_jobs, changed_paths
 
 class CIScopeTest(unittest.TestCase):
     def test_documentation_only_skips_builds(self):
-        self.assertEqual(affected_jobs(["README.md", "docs/api.md", "frontend/README.md"]), set())
+        self.assertEqual(affected_jobs(["README.md", "AGENTS.md", "frontend/README.md"]), set())
 
     def test_dependencies_select_the_consumers(self):
         cases = {
@@ -19,6 +19,8 @@ class CIScopeTest(unittest.TestCase):
             "frontend/src/lib/components/FileList.svelte": {"frontend", "desktop", "docker"},
             "frontend/scripts/perf/backend.ts": {"backend", "frontend", "desktop", "docker"},
             "website/src/pages/index.astro": {"website"},
+            "docs/index.md": {"website"},
+            "docs/api.md": {"website"},
             "desktop/src/app.ts": {"desktop"},
             "bun.lock": {"frontend", "website", "desktop", "docker"},
             "Dockerfile": {"docker"},
