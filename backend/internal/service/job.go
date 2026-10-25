@@ -185,11 +185,20 @@ func (s *jobService) Create(ctx context.Context, params model.JobParams) (*model
 		if err != nil {
 			return nil, err
 		}
+		if err := s.mounts.requireWritablePath(resolvedDestPath, true); err != nil {
+			return nil, err
+		}
 		if destMount.ReadOnly {
 			return nil, ErrPermissionDenied
 		}
 		destFsPath = resolvedDestPath
 		destRoot = destMount.Path
+	}
+
+	if jobSourceAccess(params.Type) == writeEntry {
+		if err := s.mounts.requireWritablePath(sourceFsPath, true); err != nil {
+			return nil, err
+		}
 	}
 
 	// Create job
@@ -394,6 +403,9 @@ func (s *jobService) revalidateJobPaths(job *model.Job) error {
 		if err != nil {
 			return err
 		}
+		if err := s.mounts.requireWritablePath(source, true); err != nil {
+			return err
+		}
 	}
 	job.ResolvedSourcePath = source
 
@@ -401,6 +413,9 @@ func (s *jobService) revalidateJobPaths(job *model.Job) error {
 		destMount := &model.MountPoint{Path: job.ResolvedDestRoot}
 		destination, err := resolveWritablePathWithinMount(s.fs, destMount, job.ResolvedDestPath)
 		if err != nil {
+			return err
+		}
+		if err := s.mounts.requireWritablePath(destination, true); err != nil {
 			return err
 		}
 		job.ResolvedDestPath = destination

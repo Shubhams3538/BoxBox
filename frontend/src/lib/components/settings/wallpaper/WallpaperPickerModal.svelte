@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
+	import { SettingsOperations } from '#lib/utils/settingsOperation.js';
 	import {
 		AlertTriangle,
 		Check,
@@ -23,6 +25,9 @@
 		readFileAsDataUrl,
 		type BackgroundImageMode
 	} from '#lib/utils/wallpaper.js';
+
+	const operations = new SettingsOperations();
+	onDestroy(() => operations.dispose());
 
 	type WallpaperSource = 'server';
 	type PreviewOrigin = 'server' | 'local';
@@ -58,7 +63,7 @@
 	let serverWallpaperRoots = $state<MountPoint[]>([]);
 	let serverWallpaperPath = $state('');
 	let serverWallpaperItems = $state<FileInfo[]>([]);
-	let serverWallpaperLoading = $state(false);
+	let serverWallpaperLoad = $state.raw<AbortSignal | null>(null);
 	let serverWallpaperError = $state<string | null>(null);
 	let localWallpaperError = $state<string | null>(null);
 	let localWallpaperUploading = $state(false);
@@ -98,46 +103,57 @@
 	}
 
 	async function loadServerWallpaperRoots() {
-		serverWallpaperLoading = true;
+		const signal = operations.start();
+		serverWallpaperLoad = signal;
 		serverWallpaperError = null;
 
 		try {
 			const response = await listRoots();
+			signal.throwIfAborted();
 			serverWallpaperRoots = response.roots;
 		} catch (error) {
+			if (signal.aborted) return;
 			serverWallpaperError =
 				error instanceof Error ? error.message : 'Unable to load server folders.';
 		} finally {
-			serverWallpaperLoading = false;
+			if (serverWallpaperLoad === signal) serverWallpaperLoad = null;
 		}
 	}
 
 	async function openServerWallpaperPath(path: string) {
+		const signal = operations.start();
 		serverWallpaperPath = path;
-		serverWallpaperLoading = true;
+		serverWallpaperItems = [];
+		serverWallpaperLoad = signal;
 		serverWallpaperError = null;
 
 		try {
-			const response = await listDirectory(path);
+			const response = await listDirectory(path, signal);
+			signal.throwIfAborted();
 			serverWallpaperItems = visibleByName(response.items, showHiddenFiles).slice(
 				0,
 				SERVER_WALLPAPER_ITEMS_LIMIT
 			);
 		} catch (error) {
+			if (signal.aborted) return;
 			serverWallpaperError = error instanceof Error ? error.message : 'Unable to open this folder.';
 			serverWallpaperItems = [];
 		} finally {
-			serverWallpaperLoading = false;
+			if (serverWallpaperLoad === signal) serverWallpaperLoad = null;
 		}
 	}
 
 	function openServerWallpaperRoot() {
+		operations.start();
+		serverWallpaperLoad = null;
+		if (serverWallpaperRoots.length === 0) void loadServerWallpaperRoots();
 		serverWallpaperPath = '';
 		serverWallpaperItems = [];
 		serverWallpaperError = null;
 	}
 
 	function previewServerWallpaper(item: FileInfo) {
+		if (operations.start().aborted) return;
 		const backgroundImage = toServerBackgroundImage(item.path);
 		if (!backgroundImage) return;
 
@@ -154,8 +170,9 @@
 		localWallpaperInput?.click();
 	}
 
-	async function handleLocalWallpaperChange(event: Event) {
-		const input = event.currentTarget as HTMLInputElement;
+	async function handleLocalWallpaperChange(event: Event & { currentTarget: HTMLInputElement }) {
+		const signal = operations.start();
+		const input = event.currentTarget;
 		const file = input.files?.[0];
 		input.value = '';
 
@@ -177,15 +194,19 @@
 		try {
 			localWallpaperUploading = true;
 			localWallpaperProgressLabel = 'Preparing wallpaper upload...';
-			previewBackgroundImage = await readFileAsDataUrl(file, (progress) => {
+			const image = await readFileAsDataUrl(file, (progress) => {
+				if (signal.aborted) return;
 				localWallpaperProgress = progress;
 				localWallpaperProgressLabel =
 					progress >= 100 ? 'Preparing preview...' : 'Uploading wallpaper...';
 			});
+			signal.throwIfAborted();
+			previewBackgroundImage = image;
 			previewName = file.name;
 			previewOrigin = 'local';
 			previewMode = normalizeBackgroundImageMode(currentMode);
 		} catch {
+			if (signal.aborted) return;
 			localWallpaperError = 'Unable to read this image.';
 			localWallpaperProgress = 0;
 			localWallpaperProgressLabel = '';
@@ -200,6 +221,7 @@
 	}
 
 	function returnFromPreview() {
+		operations.start();
 		const origin = previewOrigin;
 		previewBackgroundImage = null;
 		previewName = '';
@@ -215,7 +237,7 @@
 	}
 
 	function applyPreview() {
-		if (!previewBackgroundImage) return;
+		if (operations.start().aborted || !previewBackgroundImage) return;
 
 		onapply?.({
 			backgroundImage: previewBackgroundImage,
@@ -412,7 +434,7 @@
 				</div>
 			{/if}
 
-			{#if serverWallpaperLoading}
+			{#if serverWallpaperLoad}
 				<div
 					class="rounded border border-border-primary bg-surface-secondary px-3 py-8 text-center text-sm text-text-secondary"
 				>
