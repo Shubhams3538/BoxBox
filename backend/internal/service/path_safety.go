@@ -39,7 +39,8 @@ func resolveEntryWithinMount(fsys boxfs.FS, mount *model.MountPoint, path string
 	if err != nil {
 		return "", err
 	}
-	if filepath.Clean(path) == filepath.Clean(mount.Path) {
+	// A job revalidates the mount root by its resolved path, not mount.Path.
+	if clean := filepath.Clean(path); clean == filepath.Clean(mount.Path) || clean == root {
 		return root, nil
 	}
 	parent, err := fsys.EvalSymlinks(filepath.Dir(path))

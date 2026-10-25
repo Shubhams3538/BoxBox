@@ -210,3 +210,31 @@ func TestCopyJobStillCopiesSymlinkTarget(t *testing.T) {
 	}
 	requireTargetIntact(t, photos)
 }
+
+func TestJobsOnMountRootBehindSymlink(t *testing.T) {
+	for _, jobType := range []model.JobType{model.JobTypeDelete, model.JobTypeMove} {
+		base := t.TempDir()
+		real := filepath.Join(base, "real")
+		if err := os.MkdirAll(real, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(real, "a.jpg"), []byte("jpeg"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(base, "home")
+		if err := os.Symlink(real, link); err != nil {
+			t.Fatal(err)
+		}
+		dest := t.TempDir()
+		mountList := []model.MountPoint{{Name: "home", Path: link}, {Name: "dest", Path: dest}}
+
+		params := model.JobParams{Type: jobType, SourcePath: "home"}
+		if jobType == model.JobTypeMove {
+			params.DestPath = "dest/moved"
+		}
+		job := runJob(t, mountList, params)
+		if job.State != model.JobStateCompleted {
+			t.Fatalf("%s job state = %s (%s), want completed", jobType, job.State, job.Error)
+		}
+	}
+}
